@@ -1,0 +1,12 @@
+@import "tailwindcss"; /* This is the new v4 way to load everything */
+
+/* Keep your custom animations below */
+@keyframes blob {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(15px, -10px) scale(1.1); }
+  66% { transform: translate(-10px, 15px) scale(0.9); }
+}
+
+.animate-blob {
+  animation: blob 6s infinite ease-in-out;
+}
