@@ -8,6 +8,8 @@ import LoanPage from './pages/LoanPage';
 import EditProfilePage from './pages/EditPage';
 import LoginPage from './pages/LoginPage'
 import CardsPage from './pages/CardsPage'
+import TransactionsPage from './pages/TransactionsPage'
+import AccountPage from './pages/AccountPage'
 
 export default function App() {
   return (
@@ -22,6 +24,8 @@ export default function App() {
         <Route path="/settings" element={<EditProfilePage />} />
         <Route path="/logout" element={<LoginPage />} />
         <Route path="/cards" element={<CardsPage />} />
+        <Route path="/history" element={<TransactionsPage />} />
+         <Route path="/account" element={<AccountPage />} />
       </Routes>
     </Router>
   );

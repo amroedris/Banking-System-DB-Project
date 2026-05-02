@@ -122,7 +122,7 @@ export default function CustomerDashboard() {
           </div>
         </div>
 
-        {/* BOTTOM SECTION: Accounts & Activity */}
+{/* BOTTOM SECTION: Accounts & Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* ACCOUNTS LIST */}
@@ -133,9 +133,16 @@ export default function CustomerDashboard() {
             </h2>
             <div className="space-y-4">
               {accounts.map((account) => (
-                <div key={account.id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 hover:shadow-md transition-all border-l-4 border-l-[#004a99]">
+                <div 
+                  key={account.id} 
+                  onClick={() => navigate('/account')} 
+                  className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 hover:shadow-md transition-all border-l-4 border-l-[#004a99] cursor-pointer group"
+                >
                   <div>
-                    <h3 className="font-bold text-gray-800 text-lg">{account.name}</h3>
+                    {/* Added group-hover to change text color when the card is hovered */}
+                    <h3 className="font-bold text-gray-800 text-lg group-hover:text-[#004a99] transition-colors">
+                      {account.name}
+                    </h3>
                     <p className="text-gray-400 font-mono text-sm tracking-widest">{account.number}</p>
                   </div>
                   <div className="text-left sm:text-right">
@@ -151,7 +158,9 @@ export default function CustomerDashboard() {
           <div>
             <div className="flex justify-between items-end mb-6">
               <h2 className="text-xl font-black text-gray-900">Activity</h2>
-              <button className="text-sm font-bold text-[#004a99] hover:text-[#a37e2c] transition-colors underline decoration-2 underline-offset-4">
+              <button 
+              onClick={() => navigate('/history')}
+              className="text-sm font-bold text-[#004a99] hover:text-[#a37e2c] transition-colors underline decoration-2 underline-offset-4">
                 View History
               </button>
             </div>

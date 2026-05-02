@@ -5,8 +5,8 @@ import euiLogo from '../assets/EUI-Cropped.jpg';
 export default function CardsPage() {
   const navigate = useNavigate();
 
-  // Dummy Cards Data
-  const myCards = [
+  // We moved the dummy data into State so we can actually update the UI!
+  const [cards, setCards] = useState([
     {
       id: 'c1',
       type: 'Debit',
@@ -18,7 +18,7 @@ export default function CardsPage() {
       cvv: '123',
       linkedAccount: 'Main Checking (•••• 4092)',
       status: 'Active',
-      color: 'from-[#004a99] to-[#002a59]', // EUI Blue Gradient
+      color: 'from-[#004a99] to-[#002a59]', 
     },
     {
       id: 'c2',
@@ -31,16 +31,57 @@ export default function CardsPage() {
       cvv: '456',
       linkedAccount: 'Credit Line: $8,500.00',
       status: 'Frozen',
-      color: 'from-[#a37e2c] to-[#7a5c1a]', // EUI Gold Gradient
+      color: 'from-[#a37e2c] to-[#7a5c1a]', 
     }
-  ];
+  ]);
 
   // State
-  const [selectedCardId, setSelectedCardId] = useState(myCards[0].id);
+  const [selectedCardId, setSelectedCardId] = useState(cards[0].id);
   const [showDetails, setShowDetails] = useState(false);
+  
+  // Modal States
+  const [isFreezeModalOpen, setIsFreezeModalOpen] = useState(false);
+  const [isLostModalOpen, setIsLostModalOpen] = useState(false);
 
   // Derived state
-  const activeCard = myCards.find(card => card.id === selectedCardId);
+  const activeCard = cards.find(card => card.id === selectedCardId);
+  const isCardFrozen = activeCard.status === 'Frozen';
+  const isCardCancelled = activeCard.status === 'Cancelled';
+
+  // Handler to freeze/unfreeze a single card
+  const handleToggleFreeze = () => {
+    setCards(cards.map(c => 
+      c.id === activeCard.id 
+        ? { ...c, status: isCardFrozen ? 'Active' : 'Frozen' } 
+        : c
+    ));
+    setIsFreezeModalOpen(false);
+  };
+
+  // Handler to permanently cancel a lost card
+  const handleReportLost = () => {
+    setCards(cards.map(c => 
+      c.id === activeCard.id 
+        ? { ...c, status: 'Cancelled' } 
+        : c
+    ));
+    setIsLostModalOpen(false);
+    
+    // In a real app, you would also trigger an API call here to issue a new card
+    setTimeout(() => {
+      alert("Your card has been permanently cancelled. A new card will be mailed to your address on file in 3-5 business days.");
+    }, 300);
+  };
+
+  // Handler to simulate "Freezing an Account" -> It freezes all cards linked to it
+  const handleFreezeAllLinkedCards = () => {
+    setCards(cards.map(c => 
+      c.linkedAccount === activeCard.linkedAccount && c.status !== 'Cancelled'
+        ? { ...c, status: 'Frozen' } 
+        : c
+    ));
+    alert(`All active cards linked to ${activeCard.linkedAccount} have been frozen.`);
+  };
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans text-gray-800 pb-10">
@@ -49,7 +90,7 @@ export default function CardsPage() {
       <header className="bg-white border-b border-gray-200 pt-6 pb-6 px-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4 md:gap-6">
-                    <img src={euiLogo} alt="EUI Logo" className="h-16 w-16" />
+            <img src={euiLogo} alt="EUI Logo" className="h-16 w-16" />
             <div className="h-10 w-px bg-gray-200 hidden md:block"></div>
             <div>
               <h1 className="text-2xl font-black text-[#004a99] tracking-tight">My Cards</h1>
@@ -76,14 +117,14 @@ export default function CardsPage() {
             
             {/* Visual Card Representation */}
             <div className="perspective-1000">
-              <div className={`relative w-full aspect-[1.586/1] rounded-3xl p-6 sm:p-8 shadow-2xl text-white overflow-hidden transition-all duration-500 bg-gradient-to-br ${activeCard.color}`}>
+              <div className={`relative w-full aspect-[1.586/1] rounded-3xl p-6 sm:p-8 shadow-2xl text-white overflow-hidden transition-all duration-500 bg-gradient-to-br ${isCardCancelled ? 'from-gray-500 to-gray-800 grayscale' : activeCard.color}`}>
                 
                 {/* Card Background Decoration */}
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-20 -mt-20 blur-2xl"></div>
                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-black/10 rounded-full -ml-16 -mb-16 blur-xl"></div>
                 
-                {/* Frozen Overlay */}
-                {activeCard.status === 'Frozen' && (
+                {/* Status Overlays */}
+                {isCardFrozen && !isCardCancelled && (
                   <div className="absolute inset-0 bg-white/20 backdrop-blur-md flex items-center justify-center z-20 rounded-3xl">
                     <div className="bg-white/90 text-gray-900 px-6 py-2 rounded-full font-black tracking-widest uppercase text-sm shadow-lg flex items-center gap-2">
                       <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
@@ -92,8 +133,17 @@ export default function CardsPage() {
                   </div>
                 )}
 
+                {isCardCancelled && (
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20 rounded-3xl">
+                    <div className="bg-red-600 text-white px-6 py-2 rounded-full font-black tracking-widest uppercase text-sm shadow-lg flex items-center gap-2 mb-2">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                      Cancelled
+                    </div>
+                    <p className="text-gray-300 text-xs font-bold tracking-wider">REPLACEMENT ORDERED</p>
+                  </div>
+                )}
+
                 <div className="relative z-10 h-full flex flex-col justify-between">
-                  
                   {/* Top Row: Bank Name & Contactless Icon */}
                   <div className="flex justify-between items-start">
                     <h2 className="text-xl sm:text-2xl font-black italic tracking-wider opacity-90">EUI BANK</h2>
@@ -103,7 +153,6 @@ export default function CardsPage() {
                   {/* Middle: Chip & Card Number */}
                   <div>
                     <div className="w-12 h-10 bg-gradient-to-br from-yellow-200 to-yellow-500 rounded-md mb-4 opacity-90 flex items-center justify-center">
-                      {/* Decorative chip lines */}
                       <div className="w-full h-px bg-yellow-600/50 absolute"></div>
                       <div className="w-px h-full bg-yellow-600/50 absolute"></div>
                     </div>
@@ -132,7 +181,8 @@ export default function CardsPage() {
             <div className="flex justify-center">
               <button 
                 onClick={() => setShowDetails(!showDetails)}
-                className="flex items-center gap-2 text-sm font-bold text-[#004a99] hover:text-[#003d7a] transition-colors bg-white px-6 py-2 rounded-full shadow-sm border border-gray-200"
+                disabled={isCardCancelled}
+                className={`flex items-center gap-2 text-sm font-bold bg-white px-6 py-2 rounded-full shadow-sm border border-gray-200 transition-colors ${isCardCancelled ? 'opacity-50 cursor-not-allowed text-gray-400' : 'text-[#004a99] hover:text-[#003d7a]'}`}
               >
                 {showDetails ? (
                   <>
@@ -150,17 +200,20 @@ export default function CardsPage() {
 
             {/* Card Switcher / Carousel Dots */}
             <div className="flex gap-4 overflow-x-auto pb-4 hide-scrollbar">
-              {myCards.map((card) => (
+              {cards.map((card) => (
                 <button 
                   key={card.id}
                   onClick={() => {
                     setSelectedCardId(card.id);
                     setShowDetails(false); // Reset visibility on switch
                   }}
-                  className={`flex-1 min-w-[140px] p-4 rounded-2xl border-2 text-left transition-all ${selectedCardId === card.id ? 'border-[#004a99] bg-blue-50/50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                  className={`flex-1 min-w-[140px] p-4 rounded-2xl border-2 text-left transition-all relative ${selectedCardId === card.id ? 'border-[#004a99] bg-blue-50/50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                 >
+                  {card.status === 'Cancelled' && (
+                    <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-red-500"></span>
+                  )}
                   <p className="text-xs font-bold text-gray-500 uppercase mb-1">{card.type}</p>
-                  <p className="font-bold text-gray-900 truncate">{card.name}</p>
+                  <p className={`font-bold truncate ${card.status === 'Cancelled' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{card.name}</p>
                   <p className="text-sm font-mono text-gray-400 mt-2">{card.maskedNumber.slice(-4)}</p>
                 </button>
               ))}
@@ -177,18 +230,24 @@ export default function CardsPage() {
                   <h2 className="text-2xl font-black text-gray-900">{activeCard.name}</h2>
                   <p className="text-gray-500 font-medium mt-1">Linked to: <span className="text-gray-800 font-bold">{activeCard.linkedAccount}</span></p>
                 </div>
-                <div className={`px-4 py-2 rounded-full text-sm font-black uppercase tracking-wider ${activeCard.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <div className={`px-4 py-2 rounded-full text-sm font-black uppercase tracking-wider 
+                  ${activeCard.status === 'Active' ? 'bg-green-100 text-green-700' : ''}
+                  ${activeCard.status === 'Frozen' ? 'bg-orange-100 text-orange-700' : ''}
+                  ${activeCard.status === 'Cancelled' ? 'bg-gray-100 text-gray-700' : ''}
+                `}>
                   {activeCard.status}
                 </div>
               </div>
 
               {/* Secure Details Row (CVV & ZIP) */}
               <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 relative overflow-hidden">
+                  {isCardCancelled && <div className="absolute inset-0 bg-white/50 backdrop-blur-[2px] z-10"></div>}
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">CVV / Security Code</p>
-                  <p className="text-xl font-mono font-bold text-gray-900">{showDetails ? activeCard.cvv : '•••'}</p>
+                  <p className="text-xl font-mono font-bold text-gray-900">{showDetails && !isCardCancelled ? activeCard.cvv : '•••'}</p>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 relative overflow-hidden">
+                  {isCardCancelled && <div className="absolute inset-0 bg-white/50 backdrop-blur-[2px] z-10"></div>}
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Billing Zip</p>
                   <p className="text-xl font-mono font-bold text-gray-900">10001</p>
                 </div>
@@ -200,34 +259,58 @@ export default function CardsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 
                 {/* Freeze Toggle */}
-                <div className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-2xl hover:border-gray-300 transition-colors">
+                <button 
+                  onClick={() => setIsFreezeModalOpen(true)}
+                  disabled={isCardCancelled}
+                  className={`flex items-center justify-between p-4 bg-white border border-gray-200 rounded-2xl transition-all text-left
+                    ${isCardCancelled ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-300'}
+                  `}
+                >
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${activeCard.status === 'Frozen' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isCardFrozen ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-600'}`}>
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                     </div>
                     <div>
-                      <p className="font-bold text-gray-900 text-sm">Freeze Card</p>
-                      <p className="text-xs text-gray-500">Temporarily disable</p>
+                      <p className="font-bold text-gray-900 text-sm">{isCardFrozen ? 'Unfreeze Card' : 'Freeze Card'}</p>
+                      <p className="text-xs text-gray-500">{isCardFrozen ? 'Enable transactions' : 'Temporarily disable'}</p>
                     </div>
                   </div>
                   {/* Visual Toggle Switch */}
-                  <button className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${activeCard.status === 'Frozen' ? 'bg-blue-600' : 'bg-gray-200'}`}>
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${activeCard.status === 'Frozen' ? 'translate-x-6' : 'translate-x-1'}`}></span>
-                  </button>
-                </div>
-                
-
-                {/* Report Stolen */}
-                <button className="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-2xl hover:border-red-500 hover:bg-red-50 transition-all group text-left">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 group-hover:bg-red-500 group-hover:text-white transition-colors">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                  </div>
-                  <div>
-                    <p className="font-bold text-gray-900 text-sm group-hover:text-red-700">Report Lost</p>
-                    <p className="text-xs text-gray-500">Cancel and replace card</p>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isCardFrozen && !isCardCancelled ? 'bg-orange-500' : 'bg-gray-200'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isCardFrozen && !isCardCancelled ? 'translate-x-6' : 'translate-x-1'}`}></span>
                   </div>
                 </button>
                 
+                {/* Report Stolen */}
+                <button 
+                  onClick={() => setIsLostModalOpen(true)}
+                  disabled={isCardCancelled}
+                  className={`flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-2xl transition-all group text-left
+                    ${isCardCancelled ? 'opacity-50 cursor-not-allowed' : 'hover:border-red-500 hover:bg-red-50'}
+                  `}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 transition-colors
+                    ${!isCardCancelled && 'group-hover:bg-red-500 group-hover:text-white'}
+                  `}>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                  </div>
+                  <div>
+                    <p className={`font-bold text-gray-900 text-sm ${!isCardCancelled && 'group-hover:text-red-700'}`}>Report Lost</p>
+                    <p className="text-xs text-gray-500">Cancel and replace card</p>
+                  </div>
+                </button>
+              </div>
+
+              {/* Bulk Action for Linked Account */}
+              <div className="mt-8 pt-6 border-t border-gray-100">
+                <button 
+                  onClick={handleFreezeAllLinkedCards}
+                  className="w-full flex items-center justify-center gap-2 py-4 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 transition-colors shadow-md"
+                >
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                  Lock All Cards Linked to {activeCard.linkedAccount.split('(')[0].trim()}
+                </button>
+                <p className="text-center text-xs text-gray-500 mt-3">Use this to secure your entire funding source if your wallet is missing.</p>
               </div>
 
             </div>
@@ -235,6 +318,84 @@ export default function CardsPage() {
 
         </div>
       </main>
+
+      {/* Single Card Freeze Modal */}
+      {isFreezeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            
+            <div className="w-16 h-16 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mb-6 mx-auto">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+            </div>
+
+            <h3 className="text-2xl font-black text-gray-900 mb-2 text-center">
+              {isCardFrozen ? 'Unfreeze Card?' : 'Freeze this card?'}
+            </h3>
+            
+            <p className="text-gray-500 text-center text-sm mb-8">
+              {isCardFrozen 
+                ? `Your ${activeCard.name} will be active again and you can use it for purchases immediately.`
+                : "This will temporarily prevent any new purchases or withdrawals. Autopayments may also be declined. You can easily unfreeze it later."}
+            </p>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setIsFreezeModalOpen(false)}
+                className="flex-1 py-4 bg-gray-100 text-gray-800 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleToggleFreeze}
+                className={`flex-1 py-4 text-white font-black rounded-xl shadow-md transition-all active:scale-95 ${isCardFrozen ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-500 hover:bg-orange-600'}`}
+              >
+                {isCardFrozen ? 'Yes, Unfreeze' : 'Yes, Freeze'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Lost / Cancel Card Modal */}
+      {isLostModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl relative animate-in fade-in zoom-in duration-200 border-2 border-red-100">
+            
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6 mx-auto">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            </div>
+
+            <h3 className="text-2xl font-black text-gray-900 mb-2 text-center">
+              Report Card Missing?
+            </h3>
+            
+            <p className="text-gray-500 text-center text-sm mb-6">
+              This will <span className="font-bold text-red-600">permanently cancel</span> your current card. A replacement card with a new number will be shipped to your address.
+            </p>
+
+            <div className="bg-red-50 p-4 rounded-xl border border-red-100 mb-8 text-xs text-red-800 flex gap-3">
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <p>Are you just looking for a misplaced card? Use the <strong>Freeze</strong> feature instead, which can be reversed.</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setIsLostModalOpen(false)}
+                className="flex-1 py-4 bg-gray-100 text-gray-800 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+              >
+                Go Back
+              </button>
+              <button 
+                onClick={handleReportLost}
+                className="flex-1 py-4 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 shadow-md transition-all active:scale-95"
+              >
+                Cancel Card
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
