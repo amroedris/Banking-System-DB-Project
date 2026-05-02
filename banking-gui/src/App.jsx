@@ -1,25 +1,25 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
-// Import your pages
+// Import all the pages we just created
 import CustomerDashboard from './pages/HomePage';
 import TransferPage from './pages/TransfersPage';
 import LoanPage from './pages/LoanPage';
 import EditProfilePage from './pages/EditPage';
-import LoginPage from './pages/LoginPage';
-import CardsPage from './pages/CardsPage';
+import LoginPage from './pages/LoginPage'
+import CardsPage from './pages/CardsPage'
+import TransactionsPage from './pages/TransactionsPage'
+import AccountPage from './pages/AccountPage'
 
 export default function App() {
   return (
     <Router>
       <Routes>
-        {/* 1. SET LOGIN AS THE DEFAULT PAGE */}
+        {/* The Login is the home page ("/") */}
         <Route path="/" element={<LoginPage />} />
-        
-        {/* 2. DASHBOARD PATH (Moved to /dashboard) */}
         <Route path="/dashboard" element={<CustomerDashboard />} />
         
-        {/* 3. SUB-PAGES */}
+        {/* The sub-pages */}
         <Route path="/transfers" element={<TransferPage />} />
         <Route path="/loans" element={<LoanPage />} />
         <Route path="/settings" element={<EditProfilePage />} />
