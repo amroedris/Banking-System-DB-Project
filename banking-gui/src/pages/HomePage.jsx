@@ -49,7 +49,7 @@ export default function CustomerDashboard() {
             </div>
             
             <button 
-            onClick={() => navigate('/logout')}
+            onClick={() => navigate('/')}
             className="px-5 py-2 bg-white border-2 border-gray-100 text-gray-600 font-bold rounded-xl hover:border-red-100 hover:text-red-600 hover:bg-red-50 transition-all active:scale-95">
               Log Out
             </button>
