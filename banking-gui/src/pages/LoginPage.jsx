@@ -4,13 +4,20 @@ import euiLogo from '../assets/eui-logo.png';
 import euiLogo2 from '../assets/EUI.jpg';
 
 export default function LoginPage() {
-     const navigate = useNavigate();
+  const navigate = useNavigate();
   const [role, setRole] = useState('customer');
   const [formData, setFormData] = useState({ id: '', password: '' });
 
   const handleSubmit = (e) => {
     e.preventDefault();
     console.log(`Logging in as ${role}:`, formData);
+
+    // Conditional Navigation Logic
+    if (role === 'staff') {
+      navigate('/staff-dashboard');
+    } else {
+      navigate('/dashboard');
+    }
   };
 
   return (
@@ -30,7 +37,8 @@ export default function LoginPage() {
             alt="Banking"
             className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-[#FFFFFFF]"></div>
+          {/* Fixed the background color hex code from FFFFFFF to FFFFFF */}
+          <div className="absolute inset-0 bg-[#FFFFFF] opacity-10"></div>
         </div>
 
         {/* Right side: Login Form */}
@@ -42,15 +50,17 @@ export default function LoginPage() {
             <h1 className="text-xl font-bold text-[#004a99] text-center">Digital Banking Portal</h1>
           </div>
 
-          {/* Role Selection Tabs using EUI Blue */}
+          {/* Role Selection Tabs */}
           <div className="flex bg-gray-200 p-1 rounded-xl mb-6">
             <button 
+              type="button"
               onClick={() => setRole('customer')}
               className={`flex-1 py-2 px-4 rounded-lg transition font-semibold ${role === 'customer' ? 'bg-[#004a99] text-white shadow-md' : 'text-gray-500 hover:text-[#004a99]'}`}
             >
               Customer
             </button>
             <button 
+              type="button"
               onClick={() => setRole('staff')}
               className={`flex-1 py-2 px-4 rounded-lg transition font-semibold ${role === 'staff' ? 'bg-[#004a99] text-white shadow-md' : 'text-gray-500 hover:text-[#004a99]'}`}
             >
@@ -58,7 +68,7 @@ export default function LoginPage() {
             </button>
           </div>
 
-          {/* Form with EUI Focus Colors */}
+          {/* Form */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <input
               type="text"
@@ -79,8 +89,9 @@ export default function LoginPage() {
             />
 
             <button 
-            onClick={() => navigate('/dashboard')}
-            type="submit" className="py-3 px-4 mt-2 rounded-xl bg-[#004a99] text-white font-bold shadow-lg hover:bg-[#003d7a] active:scale-95 transition-all">
+              type="submit" 
+              className="py-3 px-4 mt-2 rounded-xl bg-[#004a99] text-white font-bold shadow-lg hover:bg-[#003d7a] active:scale-95 transition-all"
+            >
               Login to EUI Bank
             </button>
 

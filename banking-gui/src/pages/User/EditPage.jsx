@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import euiLogo from '../assets/EUI-Cropped.jpg'; // Make sure this path is correct
+import euiLogo from '../../assets/EUI-Cropped.jpg'; // Make sure this path is correct
 
 export default function EditProfilePage() {
 const navigate = useNavigate();

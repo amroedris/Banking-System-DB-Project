@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import euiLogo from '../assets/EUI-Cropped.jpg'; // Importing your logo
+import euiLogo from '../../assets/EUI-Cropped.jpg'; // Importing your logo
 
 export default function CustomerDashboard() {
   const navigate = useNavigate();
