@@ -1,87 +1,90 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Added useEffect
 import { useNavigate } from 'react-router-dom';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function CardsPage() {
   const navigate = useNavigate();
-
-  // We moved the dummy data into State so we can actually update the UI!
-  const [cards, setCards] = useState([
-    {
-      id: 'c1',
-      type: 'Debit',
-      name: 'EUI Premium Debit',
-      cardholder: 'SARAH CONNOR',
-      number: '4092 1122 3344 5566',
-      maskedNumber: '•••• •••• •••• 5566',
-      expiry: '12/28',
-      cvv: '123',
-      linkedAccount: 'Main Checking (•••• 4092)',
-      status: 'Active',
-      color: 'from-[#004a99] to-[#002a59]', 
-    },
-    {
-      id: 'c2',
-      type: 'Credit',
-      name: 'EUI Rewards Visa',
-      cardholder: 'SARAH CONNOR',
-      number: '4147 8831 2290 1234',
-      maskedNumber: '•••• •••• •••• 1234',
-      expiry: '05/27',
-      cvv: '456',
-      linkedAccount: 'Credit Line: $8,500.00',
-      status: 'Frozen',
-      color: 'from-[#a37e2c] to-[#7a5c1a]', 
-    }
-  ]);
-
-  // State
-  const [selectedCardId, setSelectedCardId] = useState(cards[0].id);
+  const [cards, setCards] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCardId, setSelectedCardId] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
-  
-  // Modal States
   const [isFreezeModalOpen, setIsFreezeModalOpen] = useState(false);
   const [isLostModalOpen, setIsLostModalOpen] = useState(false);
 
-  // Derived state
+  const user = JSON.parse(localStorage.getItem("user"));
+
+  const fetchCards = async () => {
+    try {
+      const response = await fetch(`http://localhost:3000/cards/${user.CUSTOMER_ID}`);
+      const data = await response.json();
+
+      const mappedCards = data.map(dbCard => ({
+        id: dbCard.CARD_ID,
+        type: dbCard.CARD_TYPE,
+        name: `${dbCard.CARD_TYPE} Card`,
+        cardholder: dbCard.CARDHOLDER,
+        number: dbCard.CARD_NUMBER,
+        maskedNumber: `•••• •••• •••• ${dbCard.CARD_NUMBER.slice(-4)}`,
+        expiry: new Date(dbCard.EXPIRY_DATE).toLocaleDateString('en-US', { month: '2-digit', year: '2-digit' }),
+        cvv: dbCard.CVV,
+        linkedAccount: `Acc: ${dbCard.ACCOUNT_NUMBER}`,
+        status: dbCard.CARD_STATUS === 'Blocked' ? 'Frozen' : 
+          dbCard.CARD_STATUS === 'Suspended' ? 'Cancelled' : 
+          dbCard.CARD_STATUS,
+        color: dbCard.CARD_TYPE === 'Debit' ? 'from-[#004a99] to-[#002a59]' : 'from-[#a37e2c] to-[#7a5c1a]'
+      }));
+
+      setCards(mappedCards);
+      if (mappedCards.length > 0 && !selectedCardId) setSelectedCardId(mappedCards[0].id);
+      setLoading(false);
+    } catch (err) {
+      console.error("Error fetching cards:", err);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.CUSTOMER_ID) fetchCards();
+  }, []);
+
   const activeCard = cards.find(card => card.id === selectedCardId);
-  const isCardFrozen = activeCard.status === 'Frozen';
-  const isCardCancelled = activeCard.status === 'Cancelled';
 
-  // Handler to freeze/unfreeze a single card
-  const handleToggleFreeze = () => {
-    setCards(cards.map(c => 
-      c.id === activeCard.id 
-        ? { ...c, status: isCardFrozen ? 'Active' : 'Frozen' } 
-        : c
-    ));
-    setIsFreezeModalOpen(false);
+  // --- ADDED DEFINITIONS FOR THE UI VARIABLES ---
+  const isCardFrozen = activeCard?.status === 'Frozen';
+  const isCardCancelled = activeCard?.status === 'Cancelled';
+
+  const handleToggleFreeze = async () => {
+    const newStatus = isCardFrozen ? 'Active' : 'Frozen';
+    try {
+      const response = await fetch('http://localhost:3000/cards/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardId: activeCard.id, newStatus })
+      });
+      if (response.ok) fetchCards();
+      setIsFreezeModalOpen(false);
+    } catch (err) { alert("Failed to update status"); }
   };
 
-  // Handler to permanently cancel a lost card
-  const handleReportLost = () => {
-    setCards(cards.map(c => 
-      c.id === activeCard.id 
-        ? { ...c, status: 'Cancelled' } 
-        : c
-    ));
-    setIsLostModalOpen(false);
-    
-    // In a real app, you would also trigger an API call here to issue a new card
-    setTimeout(() => {
-      alert("Your card has been permanently cancelled. A new card will be mailed to your address on file in 3-5 business days.");
-    }, 300);
+  const handleReportLost = async () => {
+    try {
+      await fetch('http://localhost:3000/cards/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardId: activeCard.id, newStatus: 'Cancelled' })
+      });
+      fetchCards();
+      setIsLostModalOpen(false);
+    } catch (err) { alert("Error reporting lost card."); }
   };
 
-  // Handler to simulate "Freezing an Account" -> It freezes all cards linked to it
+  // ADDED PLACEHOLDER
   const handleFreezeAllLinkedCards = () => {
-    setCards(cards.map(c => 
-      c.linkedAccount === activeCard.linkedAccount && c.status !== 'Cancelled'
-        ? { ...c, status: 'Frozen' } 
-        : c
-    ));
-    alert(`All active cards linked to ${activeCard.linkedAccount} have been frozen.`);
+    alert("Functionality to lock all cards coming soon!");
   };
+
+  if (loading) return <div className="p-10 text-center">Loading Cards...</div>;
+  if (!activeCard && !loading) return <div className="p-10 text-center">No cards found.</div>;
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans text-gray-800 pb-10">
@@ -245,11 +248,6 @@ export default function CardsPage() {
                   {isCardCancelled && <div className="absolute inset-0 bg-white/50 backdrop-blur-[2px] z-10"></div>}
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">CVV / Security Code</p>
                   <p className="text-xl font-mono font-bold text-gray-900">{showDetails && !isCardCancelled ? activeCard.cvv : '•••'}</p>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 relative overflow-hidden">
-                  {isCardCancelled && <div className="absolute inset-0 bg-white/50 backdrop-blur-[2px] z-10"></div>}
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Billing Zip</p>
-                  <p className="text-xl font-mono font-bold text-gray-900">10001</p>
                 </div>
               </div>
 

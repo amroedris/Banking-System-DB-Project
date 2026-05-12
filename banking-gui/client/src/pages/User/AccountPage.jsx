@@ -1,30 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { useLocation } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function AccountPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const accountNumber =
+  location.state?.accountNumber;
 
   // Modal and Freeze States
   const [isFreezeModalOpen, setIsFreezeModalOpen] = useState(false);
   const [isCardFrozen, setIsCardFrozen] = useState(false);
 
   // Dummy Data for the specific account being viewed
-  const [account] = useState({
-    name: 'High-Yield Savings',
-    type: 'Savings',
-    status: 'Active',
-    accountNumber: '1029 3847 5612 8831',
-    routingNumber: '122 000 496',
-    swiftCode: 'EUIB US33',
-    availableBalance: 45200.75,
-    currentBalance: 45200.75,
-    interestRate: '4.25% APY',
-    ytdInterest: 1245.50,
-    openDate: 'Jan 14, 2023',
-  });
+const [account, setAccount] = useState(null);
 
   const [showFullNumber, setShowFullNumber] = useState(false);
+
+  useEffect(() => {
+
+  if (!accountNumber) return;
+
+  axios.get(
+    `http://localhost:3000/account-details/${accountNumber}`
+  )
+  .then((response) => {
+
+    setAccount(response.data);
+
+  })
+  .catch((err) => {
+
+    console.error(err);
+
+  });
+
+}, [accountNumber]);
+
+if (!account) {
+
+  return (
+    <div className="p-10 text-2xl font-bold">
+      Loading...
+    </div>
+  );
+
+}
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans text-gray-800 pb-10">
@@ -62,13 +86,13 @@ export default function AccountPage() {
           <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <h2 className="text-3xl font-black tracking-tight">{account.name}</h2>
+                <h2 className="text-3xl font-black tracking-tight">{account.ACCOUNT_TYPE} Account</h2>
                 <span className="bg-blue-800 text-blue-100 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                  {account.status}
+                  {account.STATUS}
                 </span>
               </div>
               <p className="text-blue-200 font-mono text-lg flex items-center gap-2">
-                {showFullNumber ? account.accountNumber : `•••• •••• •••• ${account.accountNumber.slice(-4)}`}
+                {showFullNumber ? String(account.ACCOUNT_NUMBER) : `•••• •••• •••• ${String(account.ACCOUNT_NUMBER).slice(-4)}`}
                 <button 
                   onClick={() => setShowFullNumber(!showFullNumber)}
                   className="p-1 hover:bg-blue-800 rounded-md transition-colors text-blue-300 hover:text-white"
@@ -86,7 +110,7 @@ export default function AccountPage() {
             <div className="text-left md:text-right">
               <p className="text-blue-200 text-sm font-bold uppercase tracking-wider mb-1">Available Balance</p>
               <h3 className="text-5xl font-black drop-shadow-md">
-                ${account.availableBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                ${Number(account.BALANCE).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </h3>
             </div>
           </div>
@@ -105,7 +129,13 @@ export default function AccountPage() {
           </button>
           
           <button 
-            onClick={() => navigate('/history')}
+            onClick={() =>
+                    navigate('/history', {
+                      state: {
+                        accountNumber: account.ACCOUNT_NUMBER
+                      }
+                    })
+                  }
             className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-md hover:border-[#004a99] transition-all group"
           >
             <div className="w-12 h-12 bg-blue-50 text-[#004a99] rounded-full flex items-center justify-center mb-2 group-hover:bg-[#004a99] group-hover:text-white transition-all">
@@ -122,64 +152,29 @@ export default function AccountPage() {
           <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100">
             <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
               <span className="w-2 h-6 bg-[#004a99] rounded-full"></span>
-              Routing & Details
+              Account Specs
             </h3>
             
             <div className="space-y-6">
               <div className="flex justify-between items-center pb-4 border-b border-gray-100">
                 <div>
-                  <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Routing Number</p>
-                  <p className="text-lg font-mono font-bold text-gray-900">{account.routingNumber}</p>
+                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Account Type</p>
+                <p className="font-bold text-gray-900">{account.ACCOUNT_TYPE}</p>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pb-4 border-b border-gray-100">
                 <div>
                   <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Account Number</p>
-                  <p className="text-lg font-mono font-bold text-gray-900">{account.accountNumber}</p>
+                  <p className="text-lg font-mono font-bold text-gray-900">{String(account.ACCOUNT_NUMBER)}</p>
                 </div>
               </div>
 
               <div className="flex justify-between items-center">
                 <div>
-                  <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">SWIFT / BIC Code</p>
-                  <p className="text-lg font-mono font-bold text-gray-900">{account.swiftCode}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Account Specs */}
-          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100">
-            <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
-              <span className="w-2 h-6 bg-[#a37e2c] rounded-full"></span>
-              Account Specs
-            </h3>
-
-            <div className="grid grid-cols-2 gap-y-6 gap-x-4">
-              <div>
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Account Type</p>
-                <p className="font-bold text-gray-900">{account.type}</p>
-              </div>
-              
-              <div>
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Interest Rate</p>
-                <p className="font-bold text-green-600 bg-green-50 inline-block px-2 py-1 rounded-md">{account.interestRate}</p>
-              </div>
-
-              <div>
                 <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Current Balance</p>
-                <p className="font-bold text-gray-900">${account.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-              </div>
-
-              <div>
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">YTD Interest</p>
-                <p className="font-bold text-gray-900">+${account.ytdInterest.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-              </div>
-
-              <div className="col-span-2 pt-4 border-t border-gray-100">
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Opened On</p>
-                <p className="font-bold text-gray-900">{account.openDate}</p>
+                <p className="font-bold text-gray-900">${Number(account.BALANCE).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                </div>
               </div>
             </div>
           </div>
