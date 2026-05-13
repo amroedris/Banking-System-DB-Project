@@ -344,82 +344,487 @@ app.post('/cards/status', async (req, res) => {
 });
 
 app.get("/loans/:customerId", async (req, res) => {
+
   let connection;
+
   try {
+
     connection = await oracledb.getConnection(dbConfig);
+
     const result = await connection.execute(
-      `SELECT * FROM loan WHERE customer_id = :id AND loan_state = 'ACTIVE'`,
+      `SELECT *
+      FROM loan
+      WHERE customer_id = :id
+      AND loan_state = 'ACTIVE'
+      ORDER BY start_date DESC`,
       [req.params.customerId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    res.json(result.rows[0] || null); // Return first active loan or null
-  } catch (err) {
-    res.status(500).send(err.message);
-  } finally {
-    if (connection) await connection.close();
-  }
-});
 
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).send(err.message);
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+// APPLY FOR NEW LOAN
 // APPLY FOR NEW LOAN
 app.post("/loans/apply", async (req, res) => {
   const { customerId, amount, term, interestRate } = req.body;
+
   let connection;
+
   try {
     connection = await oracledb.getConnection(dbConfig);
+
+    // Total amount INCLUDING interest
+    const totalAmount =
+      Number(amount) +
+      (Number(amount) * Number(interestRate) / 100);
+
+    // Monthly installment
+    const monthlyPayment = totalAmount / Number(term);
+
     await connection.execute(
       `INSERT INTO loan (
-        loan_id, customer_id, loan_amount, interest_rate, 
-        due_date, status, loan_term, total_paid_off, loan_state
+        loan_id,
+        customer_id,
+        loan_amount,
+        interest_rate,
+        due_date,
+        status,
+        loan_term,
+        total_paid_off,
+        loan_state,
+        start_date,
+        monthly_payment
       ) VALUES (
-        loan_seq.NEXTVAL, :cid, :amt, :rate, 
-        ADD_MONTHS(SYSDATE, 1), 'Personal', :term, 0, 'ACTIVE'
+        loan_seq.NEXTVAL,
+        :cid,
+        :amt,
+        :rate,
+        ADD_MONTHS(SYSDATE, :term),
+        'Approved',
+        :term,
+        0,
+        'ACTIVE',
+        SYSDATE,
+        :monthly
       )`,
-      { cid: customerId, amt: amount, rate: interestRate, term: term },
+      {
+        cid: customerId,
+        amt: amount,
+        rate: interestRate,
+        term: term,
+        monthly: monthlyPayment
+      },
       { autoCommit: true }
     );
-    res.json({ success: true, message: "Loan approved!" });
+
+    res.json({
+      success: true,
+      message: "Loan approved!"
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
   } finally {
-    if (connection) await connection.close();
+
+    if (connection)
+      await connection.close();
+
   }
 });
 
 // MAKE LOAN PAYMENT
 app.post("/loans/pay", async (req, res) => {
+
   const { loanId, accountNumber, amount } = req.body;
+
   let connection;
+
   try {
+
     connection = await oracledb.getConnection(dbConfig);
 
-    // 1. Deduct from bank account
-    await connection.execute(
-      `UPDATE account SET balance = balance - :amount WHERE account_number = :acc`,
-      { amount, acc: accountNumber }
+    // ---------------------------
+    // GET ACCOUNT BALANCE
+    // ---------------------------
+    const accountResult = await connection.execute(
+      `SELECT balance
+       FROM account
+       WHERE account_number = :acc`,
+      { acc: accountNumber },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // 2. Update loan table
-    await connection.execute(
-      `UPDATE loan 
-       SET total_paid_off = total_paid_off + :amount 
+    if (accountResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "Account not found"
+      });
+    }
+
+    const currentBalance =
+      Number(accountResult.rows[0].BALANCE);
+
+    if (currentBalance < amount) {
+      return res.status(400).json({
+        message: "Insufficient funds"
+      });
+    }
+
+    // ---------------------------
+    // GET LOAN DATA
+    // ---------------------------
+    const loanResult = await connection.execute(
+      `SELECT
+          loan_amount,
+          interest_rate,
+          total_paid_off
+       FROM loan
        WHERE loan_id = :lid`,
-      { amount, lid: loanId }
+      { lid: loanId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // 3. Check if fully paid and update state
+    if (loanResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "Loan not found"
+      });
+    }
+
+    const loan = loanResult.rows[0];
+
+    const totalLoanWithInterest =
+      Number(loan.LOAN_AMOUNT) +
+      (
+        Number(loan.LOAN_AMOUNT) *
+        Number(loan.INTEREST_RATE) / 100
+      );
+
+    const alreadyPaid =
+      Number(loan.TOTAL_PAID_OFF || 0);
+
+    const remaining =
+      totalLoanWithInterest - alreadyPaid;
+
+    // ---------------------------
+    // PREVENT OVERPAYMENT
+    // ---------------------------
+    if (Number(amount) > remaining) {
+      return res.status(400).json({
+        message:
+          `Payment exceeds remaining balance ($${remaining.toFixed(2)})`
+      });
+    }
+
+    // ---------------------------
+    // DEDUCT FROM ACCOUNT
+    // ---------------------------
     await connection.execute(
-      `UPDATE loan 
-       SET loan_state = 'PAID' 
-       WHERE loan_id = :lid AND total_paid_off >= loan_amount`,
-      { lid: loanId }
+      `UPDATE account
+       SET balance = balance - :amount
+       WHERE account_number = :acc`,
+      {
+        amount,
+        acc: accountNumber
+      }
     );
 
+    // ---------------------------
+    // NEW TOTAL PAID
+    // ---------------------------
+    const newTotalPaid =
+      alreadyPaid + Number(amount);
+
+    // ---------------------------
+    // UPDATE LOAN
+    // ---------------------------
+    await connection.execute(
+      `UPDATE loan
+       SET total_paid_off = :newTotalPaid
+       WHERE loan_id = :lid`,
+      {
+        newTotalPaid,
+        lid: loanId
+      }
+    );
+
+    // ---------------------------
+    // MARK AS PAID IF COMPLETE
+    // ---------------------------
+    if (newTotalPaid >= totalLoanWithInterest) {
+
+      await connection.execute(
+        `UPDATE loan
+         SET loan_state = 'PAID'
+         WHERE loan_id = :lid`,
+        { lid: loanId }
+      );
+
+    }
+
+    // ---------------------------
+    // SAVE CHANGES
+    // ---------------------------
     await connection.commit();
-    res.json({ success: true });
+
+    res.json({
+      success: true,
+      message: "Payment successful",
+      newTotalPaid,
+      remainingBalance:
+        totalLoanWithInterest - newTotalPaid
+    });
+
   } catch (err) {
-    if (connection) await connection.rollback();
-    res.status(500).json({ message: err.message });
+
+    console.error(err);
+
+    if (connection)
+      await connection.rollback();
+
+    res.status(500).json({
+      message: err.message
+    });
+
   } finally {
-    if (connection) await connection.close();
+
+    if (connection)
+      await connection.close();
+
   }
+
+});
+
+app.get("/customer/:customerId", async (req, res) => {
+
+  const customerId = req.params.customerId;
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+const result = await connection.execute(
+  `
+  SELECT
+      c.first_name,
+      c.last_name,
+      c.email,
+      c.street,
+      c.city,
+      c.governorate,
+      cp.customer_phone AS phone
+  FROM customer c
+  LEFT JOIN customer_phone cp
+    ON c.customer_id = cp.customer_id
+  WHERE c.customer_id = :id
+  `,
+  [customerId],
+  { outFormat: oracledb.OUT_FORMAT_OBJECT }
+);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "Customer not found"
+      });
+    }
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).send(err.message);
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+app.put("/customer/:customerId", async (req, res) => {
+
+  const customerId = req.params.customerId;
+
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    street,
+    city,
+    governorate
+  } = req.body;
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    // UPDATE CUSTOMER TABLE
+    await connection.execute(
+      `
+      UPDATE Customer
+      SET
+        First_Name = :firstName,
+        Last_Name = :lastName,
+        Email = :email,
+        Street = :street,
+        City = :city,
+        Governorate = :governorate
+      WHERE Customer_ID = :customerId
+      `,
+      {
+        firstName,
+        lastName,
+        email,
+        street,
+        city,
+        governorate,
+        customerId
+      }
+    );
+
+// Only touch CUSTOMER_PHONE if a phone value was actually provided
+if (phone && String(phone).trim() !== '') {
+  
+  // Check if phone belongs to another customer
+  const duplicatePhone = await connection.execute(
+    `SELECT CUSTOMER_ID FROM CUSTOMER_PHONE
+     WHERE CUSTOMER_PHONE = :phone AND CUSTOMER_ID != :customerId`,
+    { phone, customerId },
+    { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+
+  if (duplicatePhone.rows.length > 0) {
+    await connection.rollback(); // ← rollback the Customer UPDATE too
+    return res.status(400).json({ message: "Phone number already used by another customer" });
+  }
+
+  // Delete old entry (if any) then insert new one
+  await connection.execute(
+    `DELETE FROM CUSTOMER_PHONE WHERE CUSTOMER_ID = :customerId`,
+    { customerId }
+  );
+
+  await connection.execute(
+    `INSERT INTO CUSTOMER_PHONE (CUSTOMER_ID, CUSTOMER_PHONE) VALUES (:customerId, :phone)`,
+    { customerId, phone }
+  );
+}
+
+await connection.commit();
+
+    res.json({
+      message: "Customer information updated"
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    if (connection)
+      await connection.rollback();
+
+    res.status(500).send(err.message);
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+app.put("/customer-password/:customerId", async (req, res) => {
+
+  const customerId = req.params.customerId;
+
+  const {
+    currentPassword,
+    newPassword
+  } = req.body;
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    const check = await connection.execute(
+      `SELECT password
+       FROM customer
+       WHERE customer_id = :id`,
+      [customerId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (
+      check.rows.length === 0
+    ) {
+      return res.status(404).json({
+        message: "Customer not found"
+      });
+    }
+
+    if (
+      check.rows[0].PASSWORD !== currentPassword
+    ) {
+      return res.status(400).json({
+        message: "Current password is incorrect"
+      });
+    }
+
+    await connection.execute(
+      `UPDATE customer
+       SET password = :newPassword
+       WHERE customer_id = :id`,
+      {
+        newPassword,
+        id: customerId
+      },
+      { autoCommit: true }
+    );
+
+    res.json({
+      message: "Password updated successfully"
+    });
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).send(err.message);
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
 });

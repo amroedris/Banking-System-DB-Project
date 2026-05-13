@@ -15,19 +15,38 @@ export default function LoanPage() {
   const [selectedAccount, setSelectedAccount] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
   
-  const [activeLoan, setActiveLoan] = useState(null);
+const [loans, setLoans] = useState([]);
+const [selectedLoanId, setSelectedLoanId] = useState('');
   const [loading, setLoading] = useState(true);
   const user = JSON.parse(localStorage.getItem('user')) || { CUSTOMER_ID: 1 };
 
   // --- EFFECT 1: Fetch the Active Loan (This was missing!) ---
   useEffect(() => {
     setLoading(true);
-    fetch(`http://localhost:3000/loans/${user.CUSTOMER_ID}`)
-      .then(res => res.json())
-      .then(data => {
-        setActiveLoan(data);
-        setLoading(false);
-      })
+fetch(`http://localhost:3000/loans/${user.CUSTOMER_ID}`)
+  .then(res => res.json())
+  .then(data => {
+
+    const allLoans = Array.isArray(data) ? data : [];
+
+// Keep only ACTIVE loans
+const activeLoans = allLoans.filter(
+  loan => loan.LOAN_STATE === 'ACTIVE'
+);
+
+setLoans(activeLoans);
+
+// Select first active loan
+if (activeLoans.length > 0) {
+  setSelectedLoanId(activeLoans[0].LOAN_ID);
+}
+
+    if (allLoans.length > 0) {
+      setSelectedLoanId(allLoans[0].LOAN_ID);
+    }
+
+    setLoading(false);
+  })
       .catch((err) => {
         console.error("Fetch error:", err);
         setLoading(false);
@@ -52,15 +71,76 @@ useEffect(() => {
   }
 }, [isPaymentModalOpen, user.CUSTOMER_ID]);
 
+const activeLoan =
+  loans.find(
+    loan => loan.LOAN_ID === selectedLoanId
+  ) || null;
+
   // --- CALCULATIONS WITH SAFETY CHECKS ---
-  const progressPercentage = activeLoan ? (activeLoan.TOTAL_PAID_OFF / activeLoan.LOAN_AMOUNT) * 100 : 0;
-  
-  // Added || 1 and Number() checks to prevent Division by Zero (Infinity)
-  const monthlyPayment = activeLoan && activeLoan.LOAN_TERM > 0 
-    ? (activeLoan.LOAN_AMOUNT / activeLoan.LOAN_TERM).toFixed(2) 
+// --- CALCULATIONS WITH SAFETY CHECKS ---
+
+const totalLoanWithInterest = activeLoan
+  ? Number(activeLoan.LOAN_AMOUNT) +
+    (
+      Number(activeLoan.LOAN_AMOUNT) *
+      Number(activeLoan.INTEREST_RATE) / 100
+    )
+  : 0;
+
+const totalPaid =
+  Number(activeLoan?.TOTAL_PAID_OFF || 0);
+
+const remainingBalance =
+  totalLoanWithInterest - totalPaid;
+
+const progressPercentage =
+  totalLoanWithInterest > 0
+    ? (totalPaid / totalLoanWithInterest) * 100
+    : 0;
+
+const monthlyPayment =
+  activeLoan?.MONTHLY_PAYMENT
+    ? Number(activeLoan.MONTHLY_PAYMENT).toFixed(2)
     : "0.00";
 
-  const estimatedMonthly = ((loanAmount * 1.05) / loanTerm).toFixed(2);
+// Months already passed
+// Remaining months based on DUE_DATE
+const monthsRemaining = activeLoan?.DUE_DATE
+  ? Math.max(
+      (
+        (new Date(activeLoan.DUE_DATE).getFullYear() - new Date().getFullYear()) * 12
+      ) +
+      (
+        new Date(activeLoan.DUE_DATE).getMonth() - new Date().getMonth()
+      ),
+      0
+    )
+  : 0;
+
+// Calculate next installment date
+// Calculate next installment date
+const nextInstallmentDate = activeLoan?.START_DATE
+  ? new Date(
+      new Date().setMonth(
+        new Date().getMonth() + 1
+      )
+    )
+  : null;
+
+// Days left until next installment
+const daysUntilNextInstallment =
+  nextInstallmentDate
+    ? Math.ceil(
+        (
+          nextInstallmentDate -
+          new Date()
+        ) /
+        (1000 * 60 * 60 * 24)
+      )
+    : 0;
+
+const estimatedMonthly =
+  ((loanAmount * 1.05) / loanTerm).toFixed(2);
 
   const handleApply = async () => {
     const response = await fetch('http://localhost:3000/loans/apply', {
@@ -164,6 +244,28 @@ const handlePayment = async () => {
             
             <section>
               <h2 className="text-xl font-black text-gray-900 mb-4 flex items-center gap-2">
+                {loans.length > 0 && (
+  <div className="mb-4">
+    <select
+      value={selectedLoanId}
+      onChange={(e) =>
+        setSelectedLoanId(Number(e.target.value))
+      }
+      className="px-4 py-3 rounded-xl border border-gray-200 font-bold bg-white shadow-sm outline-none focus:border-[#004a99]"
+    >
+      {loans.map((loan) => (
+        <option
+          key={loan.LOAN_ID}
+          value={loan.LOAN_ID}
+        >
+          Loan #{loan.LOAN_ID} — ${Number(
+            loan.LOAN_AMOUNT
+          ).toFixed(2)}
+        </option>
+      ))}
+    </select>
+  </div>
+)}
                 <span className="w-2 h-6 bg-[#004a99] rounded-full"></span>
                 Your Active Loans
               </h2>
@@ -176,20 +278,26 @@ const handlePayment = async () => {
                     <div>
                       <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-1">{activeLoan.STATUS || 'Personal'}</p>
                       <p className="text-4xl font-black text-gray-900">
-                        ${(activeLoan.LOAN_AMOUNT - (activeLoan.TOTAL_PAID_OFF || 0)).toLocaleString()}
+                        ${remainingBalance.toFixed(2)}
                       </p>
                       <p className="text-sm font-medium text-gray-500 mt-1">Remaining Balance</p>
                     </div>
                     <div className="mt-4 sm:mt-0 text-left sm:text-right bg-blue-50 p-4 rounded-xl border border-blue-100">
                       <p className="text-sm font-bold text-[#004a99]">Due Date: {activeLoan.DUE_DATE ? new Date(activeLoan.DUE_DATE).toLocaleDateString() : 'N/A'}</p>
-                      <p className="text-xl font-black text-gray-900">${monthlyPayment}</p>
+                      <p className="text-xl font-black text-gray-900">
+  ${monthlyPayment}
+</p>
+
+<p className="text-xs text-gray-500 font-bold mt-1">
+  Monthly Installment
+</p>
                     </div>
                   </div>
 
                   <div className="relative z-10">
                     <div className="flex justify-between text-sm font-bold text-gray-500 mb-2">
-                      <span>Paid: ${(activeLoan.TOTAL_PAID_OFF || 0).toLocaleString()}</span>
-                      <span>Total: ${(activeLoan.LOAN_AMOUNT || 0).toLocaleString()}</span>
+                      <span>Paid: ${totalPaid.toFixed(2)}</span>
+<span>Total: ${totalLoanWithInterest.toFixed(2)}</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
                       <div 
@@ -198,6 +306,48 @@ const handlePayment = async () => {
                       ></div>
                     </div>
                   </div>
+
+                  <div className="mt-5 grid grid-cols-2 gap-4 text-sm">
+  
+  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+    <p className="text-gray-500 font-bold">
+      Loan Duration
+    </p>
+    <p className="text-lg font-black text-gray-900">
+      {activeLoan.LOAN_TERM} Months
+    </p>
+  </div>
+
+  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+    <p className="text-gray-500 font-bold">
+      Remaining Time
+    </p>
+    <p className="text-lg font-black text-gray-900">
+      {monthsRemaining} Months
+    </p>
+  </div>
+
+  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+    <p className="text-gray-500 font-bold">
+      Next Installment
+    </p>
+    <p className="text-md font-black text-gray-900">
+      {nextInstallmentDate
+        ? nextInstallmentDate.toLocaleDateString()
+        : 'N/A'}
+    </p>
+  </div>
+
+  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+    <p className="text-gray-500 font-bold">
+      Days Left
+    </p>
+    <p className="text-lg font-black text-gray-900">
+      {daysUntilNextInstallment} Days
+    </p>
+  </div>
+
+</div>
                   
                   <div className="mt-6 flex gap-3 relative z-10">
                     <button onClick={() => setIsPaymentModalOpen(true)} className="flex-1 py-3 bg-[#004a99] text-white font-bold rounded-xl shadow-md hover:bg-[#003d7a] transition-colors">Make a Payment</button>
