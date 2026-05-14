@@ -2,19 +2,39 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, Check, X, 
+  ArrowLeft, Check, X, Lock,
   FileText, ArrowUpRight, Landmark, Clock 
 } from 'lucide-react';
 import euiLogo from '../../assets/eui-logo.png';
 
 export default function ApprovalQueue() {
   const navigate = useNavigate();
+  
+  const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+  const isManager = staffData.JOB_ID === 1;
 
-  /* 
-    SQL BACKEND LOGIC:
-    1. SELECT * FROM approvals_view WHERE status = 'PENDING';
-    2. JOIN users ON approvals.user_id = users.id;
-  */
+  if (!isManager) {
+    return (
+      <div className="min-h-screen bg-[#f3f4f6] flex flex-col items-center justify-center p-8">
+        <div className="bg-white p-12 rounded-[3rem] shadow-xl text-center max-w-md border border-red-100">
+          <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500">
+            <Lock size={40} />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Access Denied</h2>
+          <p className="text-gray-500 mb-8">
+            Only <b>Managers</b> can access the Approval Queue.
+          </p>
+          <button 
+            onClick={() => navigate('/staff-dashboard')} 
+            className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+          >
+            <ArrowLeft size={18} /> Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const [requests, setRequests] = useState([]);
 
 const handleAction = async (id, action) => {
