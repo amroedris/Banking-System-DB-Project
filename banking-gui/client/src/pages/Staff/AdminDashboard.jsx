@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios'
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, UserPlus, ClipboardCheck, ShieldCheck, 
@@ -10,11 +11,48 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const [staffRole, setStaffRole] = useState('manager'); 
 
-  const stats = {
-    liquidity: "12,450,200.00",
-    activeUsers: 842,
-    pendingApprovals: 5
-  };
+const [stats, setStats] = useState({
+  liquidity: 0,
+  activeUsers: 0,
+  pendingApprovals: 0
+});
+
+const [activities, setActivities] = useState([]);
+
+
+useEffect(() => {
+
+  fetchDashboardData();
+
+}, []);
+
+const fetchDashboardData = async () => {
+
+  try {
+
+    // Fetch stats
+    const statsResponse = await axios.get(
+      "http://localhost:3000/admin/stats"
+    );
+
+    setStats(statsResponse.data);
+
+    // Fetch activities
+    const activityResponse = await axios.get(
+      "http://localhost:3000/admin/activity"
+    );
+
+    setActivities(activityResponse.data);
+
+  } catch (err) {
+
+    console.error(err);
+
+  }
+
+};
+
+const staff = JSON.parse(localStorage.getItem("staff"));
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans">
@@ -32,8 +70,8 @@ export default function AdminDashboard() {
 
         <div className="flex items-center gap-6">
           <div className="text-right">
-            <p className="text-sm font-bold text-gray-700">Amr Edris</p>
-            <p className="text-xs text-gray-400 capitalize">{staffRole} Access</p>
+            <p className="text-sm font-bold text-gray-700"> {staff?.FIRST_NAME} {staff?.LAST_NAME}</p>
+            <p className="text-xs text-gray-400 capitalize">{staffRole} {staff?.JOB_ID} Access</p>
           </div>
           <button 
             onClick={() => navigate('/', { replace: true })}
@@ -52,7 +90,7 @@ export default function AdminDashboard() {
           <div className="col-span-1 lg:col-span-2 bg-[#004a99] rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden">
             <div className="relative z-10">
               <p className="text-blue-100 text-sm font-medium uppercase tracking-wider mb-2">Total Bank Liquidity</p>
-              <h2 className="text-5xl font-bold italic">${stats.liquidity}</h2>
+              <h2 className="text-5xl font-bold italic">${Number(stats.liquidity).toLocaleString()}</h2>
               <div className="mt-6 flex gap-4">
                 <div className="bg-white/10 px-4 py-2 rounded-xl backdrop-blur-md">
                   <p className="text-[10px] uppercase text-blue-200">Active Customers</p>
@@ -136,30 +174,22 @@ export default function AdminDashboard() {
         <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-gray-800">Global System Activity</h3>
-            <button 
-              onClick={() => navigate('/audit-logs')}
-              className="text-[#004a99] text-xs font-bold hover:underline"
-            >
-              View Full Audit Log
-            </button>
           </div>
           
           <div className="space-y-4">
-            <ActivityItem 
-              type="transaction" 
-              text="Transaction #TXN_9901 Completed ($1,200.00)" 
-              time="2 mins ago" 
-            />
-            <ActivityItem 
-              type="onboard" 
-              text="New Customer Profile created: Ahmed Kamal" 
-              time="45 mins ago" 
-            />
-            <ActivityItem 
-              type="approval" 
-              text="Loan Request #992 Approved ($25,000.00)" 
-              time="1 hour ago" 
-            />
+{activities.map((activity) => (
+
+  <ActivityItem
+    key={activity.TRANSACTION_ID}
+    type="transaction"
+    text={`${activity.TRANSACTION_TYPE} - $${activity.AMOUNT}`}
+    time={
+      new Date(activity.TRANSACTION_TIME)
+        .toLocaleString()
+    }
+  />
+
+))}
           </div>
         </div>
       </main>

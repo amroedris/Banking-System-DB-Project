@@ -355,7 +355,7 @@ app.get("/loans/:customerId", async (req, res) => {
       `SELECT *
       FROM loan
       WHERE customer_id = :id
-      AND loan_state = 'ACTIVE'
+      AND loan_state = 'ACTIVE' AND status = 'Approved'
       ORDER BY start_date DESC`,
       [req.params.customerId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -414,7 +414,7 @@ app.post("/loans/apply", async (req, res) => {
         :amt,
         :rate,
         ADD_MONTHS(SYSDATE, :term),
-        'Approved',
+        'Pending',
         :term,
         0,
         'ACTIVE',
@@ -827,4 +827,461 @@ app.put("/customer-password/:customerId", async (req, res) => {
 
   }
 
+});
+
+app.post("/staff-login", async (req, res) => {
+
+  const { us, pass } = req.body;
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `
+      SELECT
+        employee_id,
+        first_name,
+        last_name,
+        email,
+        branch_id,
+        job_id,
+        dep_id,
+        username
+      FROM employees
+      WHERE username = :us
+      AND password = :pass
+      `,
+      { us, pass },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (result.rows.length > 0) {
+
+      res.json({
+        success: true,
+        user: result.rows[0]   // IMPORTANT (match frontend)
+      });
+
+    } else {
+
+      res.json({
+        success: false,
+        message: "Invalid staff credentials"
+      });
+
+    }
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+// ADMIN DASHBOARD STATS
+app.get("/admin/stats", async (req, res) => {
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    // Total bank liquidity
+    const liquidityResult = await connection.execute(
+      `
+      SELECT NVL(SUM(balance), 0) AS TOTAL
+      FROM account
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // Total active customers
+    const customersResult = await connection.execute(
+      `
+      SELECT COUNT(*) AS TOTAL
+      FROM customer
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // Pending loans
+    const approvalsResult = await connection.execute(
+      `
+      SELECT COUNT(*) AS TOTAL
+      FROM loan
+      WHERE status = 'Pending'
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json({
+      liquidity: liquidityResult.rows[0].TOTAL,
+      activeUsers: customersResult.rows[0].TOTAL,
+      pendingApprovals: approvalsResult.rows[0].TOTAL
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      message: err.message
+    });
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+// RECENT SYSTEM ACTIVITY
+app.get("/admin/activity", async (req, res) => {
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `
+      SELECT *
+      FROM (
+        SELECT
+          transaction_id,
+          transaction_type,
+          amount,
+          transaction_time
+        FROM bank_transaction
+        ORDER BY transaction_time DESC
+      )
+      WHERE ROWNUM <= 5
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      message: err.message
+    });
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+app.get("/approvals", async (req, res) => {
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `
+SELECT
+  l.loan_id,
+  l.customer_id,
+  l.loan_amount,
+  l.loan_term,
+  l.interest_rate,
+  l.status,
+  c.first_name || ' ' || c.last_name AS customer_name
+FROM loan l
+JOIN customer c
+  ON l.customer_id = c.customer_id
+WHERE l.status = 'Pending'
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).send(err.message);
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+app.put("/approvals/:loanId", async (req, res) => {
+
+  const { loanId } = req.params;
+
+  const { action } = req.body;
+
+  let connection;
+
+  try {
+
+    connection = await oracledb.getConnection(dbConfig);
+
+    let newStatus;
+
+    if (action === "approve") {
+      newStatus = "Approved";
+    } else {
+      newStatus = "Rejected";
+    }
+
+    await connection.execute(
+      `
+      UPDATE loan
+      SET status = :status
+      WHERE loan_id = :loanId
+      `,
+      {
+        status: newStatus,
+        loanId
+      },
+      { autoCommit: true }
+    );
+
+    res.json({
+      success: true,
+      message: `Loan ${newStatus}`
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).send(err.message);
+
+  } finally {
+
+    if (connection)
+      await connection.close();
+
+  }
+
+});
+
+app.get("/staff/customer/:id", async (req, res) => {
+  const customerId = req.params.id;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // CUSTOMER INFO
+    const customerResult = await connection.execute(
+      `
+      SELECT
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.street,
+        c.city,
+        c.governorate,
+        cp.customer_phone
+      FROM customer c
+      LEFT JOIN customer_phone cp
+        ON c.customer_id = cp.customer_id
+      WHERE c.customer_id = :id
+      `,
+      { id: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // CUSTOMER ACCOUNTS
+    const accountsResult = await connection.execute(
+      `
+      SELECT
+        a.account_number,
+        a.account_type,
+        a.balance,
+        a.status
+      FROM customer_account ca
+      JOIN account a
+        ON ca.account_number = a.account_number
+      WHERE ca.customer_id = :id
+      `,
+      { id: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // RECENT TRANSACTIONS
+    const transactionsResult = await connection.execute(
+      `
+      SELECT *
+      FROM (
+        SELECT
+          transaction_id,
+          transaction_type,
+          amount,
+          transaction_time,
+          status
+        FROM bank_transaction bt
+        WHERE bt.sender_account_number IN (
+          SELECT account_number
+          FROM customer_account
+          WHERE customer_id = :id
+        )
+        OR bt.receiver_account_number IN (
+          SELECT account_number
+          FROM customer_account
+          WHERE customer_id = :id
+        )
+        ORDER BY transaction_time DESC
+      )
+      WHERE ROWNUM <= 10
+      `,
+      { id: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json({
+      customer: customerResult.rows[0],
+      accounts: accountsResult.rows,
+      transactions: transactionsResult.rows
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+app.get("/staff/customers", async (req, res) => {
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    const result = await connection.execute(
+      `
+      SELECT
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        c.national_id,
+        NVL(SUM(a.balance), 0) AS balance,
+        UPPER(NVL(MAX(a.status), 'Inactive')) AS status
+      FROM customer c
+      LEFT JOIN customer_account ca
+        ON c.customer_id = ca.customer_id
+      LEFT JOIN account a
+        ON ca.account_number = a.account_number
+      GROUP BY c.customer_id, c.first_name, c.last_name, c.national_id
+      ORDER BY c.customer_id
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+app.put("/staff/customer/:id/freeze", async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  
+  // Transform frontend labels ('FROZEN'/'ACTIVE') to database valid syntax values ('Inactive'/'Active')
+  const mappedStatus = status === "FROZEN" ? "Inactive" : "Active";
+
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    await connection.execute(
+      `
+      UPDATE account
+      SET status = :status
+      WHERE account_number IN (
+        SELECT account_number 
+        FROM customer_account 
+        WHERE customer_id = :id
+      )
+      `,
+      {
+        status: mappedStatus,
+        id: id
+      },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+app.put("/staff/account/:accountNumber/freeze", async (req, res) => {
+  const { accountNumber } = req.params;
+  const { status } = req.body; // Expects values normalized to Check Constraints: 'Active' or 'Inactive'
+
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    await connection.execute(
+      `
+      UPDATE account
+      SET status = :status
+      WHERE account_number = :accountNumber
+      `,
+      {
+        status: status,
+        accountNumber: accountNumber
+      },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
 });
