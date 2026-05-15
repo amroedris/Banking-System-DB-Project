@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const oracledb = require("oracledb");
+const { initDatabase } = require("./database-init");
+require("dotenv").config();
 
 const app = express();
 
@@ -8,14 +10,25 @@ app.use(cors());
 app.use(express.json());
 
 const dbConfig = {
-  user: "system",
-  password: "btob",
-  connectString: "localhost/XEPDB1"
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  connectString: process.env.DB_CONNECTION_STRING
 };
 
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
-});
+const PORT = 3000;
+
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to initialize database. Server not started:", err);
+    process.exit(1);
+  });
+
+
 
 // TRANSFER ROUTE
 app.post("/transfer", async (req, res) => {
