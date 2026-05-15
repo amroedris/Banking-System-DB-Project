@@ -3,7 +3,7 @@ import { X, Landmark, Save, AlertCircle, Info } from 'lucide-react';
 import axios from 'axios';
 import { validateNonNegative, validateAmount } from '../../utils/validation.js';
 
-export default function AddAccountForCustomer({ customerId, customerName, customerDob, onClose, onSuccess }) {
+export default function AddAccountForCustomer({ customerId, customerName, customerDob, branchId, onClose, onSuccess }) {
 
   // Calculate customer age
   const { age, isUnder18, isUnder16 } = useMemo(() => {
@@ -66,7 +66,8 @@ export default function AddAccountForCustomer({ customerId, customerName, custom
     try {
       const response = await axios.post(`http://localhost:3000/staff/customer/${customerId}/accounts`, {
         accountType: formData.accountType,
-        initialDeposit: Number(formData.initialDeposit) || 0
+        initialDeposit: Number(formData.initialDeposit) || 0,
+        branchId: branchId || undefined
       });
 
       if (response.data.success) {

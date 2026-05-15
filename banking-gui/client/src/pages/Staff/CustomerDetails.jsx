@@ -29,6 +29,10 @@ export default function CustomerDetails() {
   const [isEditLimitModalOpen, setIsEditLimitModalOpen] = useState(false);
   const [limitModalData, setLimitModalData] = useState({ cardId: null, currentLimit: 0 });
 
+  // Get logged-in staff's branch for cross-branch editing restrictions
+  const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+  const staffBranchId = staffData.BRANCH_ID;
+
   useEffect(() => {
     fetchDetails();
   }, [id]);
@@ -149,14 +153,20 @@ export default function CustomerDetails() {
 
                 return openAccounts.map((acc) => {
                   const accountCards = cards.filter(c => c.ACCOUNT_NUMBER === acc.ACCOUNT_NUMBER);
+                  const isOwnBranch = staffBranchId && Number(acc.BRANCH_ID) === Number(staffBranchId);
 
                   return (
-                    <div key={acc.ACCOUNT_NUMBER} className="p-5 border border-gray-100 rounded-2xl bg-gray-50/50 flex flex-col justify-between group hover:border-blue-100 transition-all">
+                    <div key={acc.ACCOUNT_NUMBER} className={`p-6 rounded-[1.5rem] flex flex-col justify-between group transition-all duration-300 border ${isOwnBranch ? 'bg-white border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 hover:-translate-y-1' : 'bg-gray-50 border-gray-200 opacity-75'}`}>
                       <div>
                         <div className="flex justify-between items-start mb-4">
                           <div>
                             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{acc.ACCOUNT_TYPE}</p>
                             <p className="font-mono text-sm font-semibold text-gray-600 mt-1">{acc.ACCOUNT_NUMBER}</p>
+                            {!isOwnBranch && (
+                              <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider mt-1 flex items-center gap-1">
+                                <Lock size={10} /> Branch #{acc.BRANCH_ID} — Read Only
+                              </p>
+                            )}
                           </div>
                           <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${acc.STATUS === 'Active' ? 'bg-emerald-100 text-emerald-700' : acc.STATUS === 'Closed' ? 'bg-gray-200 text-gray-600' : 'bg-red-100 text-red-700'}`}>
                             {acc.STATUS}
@@ -166,9 +176,9 @@ export default function CustomerDetails() {
                         <div className="flex items-center gap-1">
                           <button 
                             onClick={() => toggleAccountFreeze(acc.ACCOUNT_NUMBER, acc.STATUS)}
-                            disabled={acc.STATUS === 'Closed'}
-                            className={`p-2 rounded-lg transition-all ${acc.STATUS === 'Active' ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-100' : acc.STATUS === 'Closed' ? 'text-gray-200 cursor-not-allowed' : 'text-cyan-600 bg-cyan-100 hover:bg-cyan-200'}`}
-                            title={acc.STATUS === 'Active' ? 'Freeze Account' : 'Unfreeze Account'}
+                            disabled={acc.STATUS === 'Closed' || !isOwnBranch}
+                            className={`p-2 rounded-lg transition-all ${!isOwnBranch ? 'text-gray-200 cursor-not-allowed' : acc.STATUS === 'Active' ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-100' : acc.STATUS === 'Closed' ? 'text-gray-200 cursor-not-allowed' : 'text-cyan-600 bg-cyan-100 hover:bg-cyan-200'}`}
+                            title={!isOwnBranch ? 'Read-only — account belongs to another branch' : acc.STATUS === 'Active' ? 'Freeze Account' : 'Unfreeze Account'}
                           >
                             <Snowflake size={18} />
                           </button>
@@ -182,7 +192,7 @@ export default function CustomerDetails() {
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Linked Cards</p>
                           <button
                             onClick={() => openIssueCardModal(acc.ACCOUNT_NUMBER)}
-                            disabled={acc.STATUS !== 'Active'}
+                            disabled={acc.STATUS !== 'Active' || !isOwnBranch}
                             className="text-[10px] font-bold text-[#004a99] bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             + Issue Card
@@ -205,7 +215,7 @@ export default function CustomerDetails() {
                                         <span className="bg-blue-50 text-[#004a99] text-[9px] font-bold px-1.5 py-0.5">
                                           Limit: ${card.CARD_LIMIT}
                                         </span>
-                                        {card.CARD_STATUS === 'Active' && (
+                                        {card.CARD_STATUS === 'Active' && isOwnBranch && (
                                           <button 
                                             onClick={() => openEditLimitModal(card.CARD_ID, card.CARD_LIMIT)}
                                             className="bg-white hover:bg-[#004a99] text-[#004a99] hover:text-white px-1.5 py-0.5 transition-colors border-l border-blue-100"
@@ -279,6 +289,7 @@ export default function CustomerDetails() {
           customerId={customer.CUSTOMER_ID}
           customerName={`${customer.FIRST_NAME} ${customer.LAST_NAME}`}
           customerDob={customer.DOB} /* <-- PASS THE DOB HERE */
+          branchId={staffBranchId}
           onClose={() => setIsAccountModalOpen(false)}
           onSuccess={() => fetchDetails()} 
         />

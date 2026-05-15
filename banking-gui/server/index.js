@@ -2015,7 +2015,8 @@ app.get("/staff/customer/:id", async (req, res) => {
         a.account_number,
         a.account_type,
         a.balance,
-        a.status
+        a.status,
+        a.branch_id
       FROM customer_account ca
       JOIN account a
         ON ca.account_number = a.account_number
