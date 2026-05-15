@@ -17,6 +17,7 @@ import AddUser from './pages/Staff/AddUser';
 import ApprovalQueue from './pages/Staff/ApprovalQueue';
 import TransactionLog from './pages/Staff/TransactionLog';
 import StaffDirectory from './pages/Staff/StaffDirectory';
+import StaffDetails from './pages/Staff/StaffDetails';
 import AddStaff from './pages/Staff/AddStaff';
 
 
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/approval-queue" element={<ApprovalQueue />} />
         <Route path="/transaction-log" element={<TransactionLog />} />
         <Route path="/staff-directory" element={<StaffDirectory />} />
+        <Route path="/staff/:employeeId" element={<StaffDetails />} />
         <Route path="/add-staff" element={<AddStaff />} />
       </Routes>
     </Router>

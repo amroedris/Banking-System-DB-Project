@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { AlertCircle } from 'lucide-react';
 
 import euiLogo from '../assets/eui-logo.png';
 import euiLogo2 from '../assets/EUI.jpg';
@@ -16,9 +17,44 @@ export default function LoginPage() {
     password: ''
   });
 
+  const [errors, setErrors] = useState({ id: '', password: '' });
+  const [touched, setTouched] = useState({ id: false, password: false });
+
+  const validateField = (name, value) => {
+    if (!value || value.trim() === '') {
+      return name === 'id' ? 'Username is required.' : 'Password is required.';
+    }
+    if (name === 'password' && value.length < 3) {
+      return 'Password must be at least 3 characters.';
+    }
+    return '';
+  };
+
+  const handleChange = (name, value) => {
+    setFormData({ ...formData, [name]: value });
+    if (touched[name]) {
+      setErrors({ ...errors, [name]: validateField(name, value) });
+    }
+  };
+
+  const handleBlur = (name) => {
+    setTouched({ ...touched, [name]: true });
+    setErrors({ ...errors, [name]: validateField(name, formData[name]) });
+  };
+
   const handleSubmit = async (e) => {
 
     e.preventDefault();
+
+    // Validate all fields before submitting
+    const idError = validateField('id', formData.id);
+    const passError = validateField('password', formData.password);
+    setErrors({ id: idError, password: passError });
+    setTouched({ id: true, password: true });
+
+    if (idError || passError) {
+      return;
+    }
 
     try {
 
@@ -168,38 +204,48 @@ export default function LoginPage() {
           >
 
             {/* ID FIELD */}
-            <input
-              type="text"
-              required
-              placeholder={
-                role === 'customer'
-                  ? "Username"
-                  : "Username"
-              }
-              value={formData.id}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  id: e.target.value
-                })
-              }
-              className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#a37e2c] transition"
-            />
+            <div className="flex flex-col gap-1">
+              <input
+                type="text"
+                required
+                placeholder={role === 'customer' ? "Username" : "Username"}
+                value={formData.id}
+                onChange={(e) => handleChange('id', e.target.value)}
+                onBlur={() => handleBlur('id')}
+                className={`w-full px-4 py-3 rounded-xl bg-white border focus:outline-none focus:ring-2 transition ${
+                  errors.id && touched.id
+                    ? 'border-red-300 focus:ring-red-400 bg-red-50'
+                    : 'border-gray-300 focus:ring-[#a37e2c]'
+                }`}
+              />
+              {errors.id && touched.id && (
+                <p className="text-xs text-red-500 font-medium flex items-center gap-1 ml-1">
+                  <AlertCircle size={12} /> {errors.id}
+                </p>
+              )}
+            </div>
 
             {/* PASSWORD FIELD */}
-            <input
-              type="password"
-              required
-              placeholder="Password"
-              value={formData.password}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  password: e.target.value
-                })
-              }
-              className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#a37e2c] transition"
-            />
+            <div className="flex flex-col gap-1">
+              <input
+                type="password"
+                required
+                placeholder="Password"
+                value={formData.password}
+                onChange={(e) => handleChange('password', e.target.value)}
+                onBlur={() => handleBlur('password')}
+                className={`w-full px-4 py-3 rounded-xl bg-white border focus:outline-none focus:ring-2 transition ${
+                  errors.password && touched.password
+                    ? 'border-red-300 focus:ring-red-400 bg-red-50'
+                    : 'border-gray-300 focus:ring-[#a37e2c]'
+                }`}
+              />
+              {errors.password && touched.password && (
+                <p className="text-xs text-red-500 font-medium flex items-center gap-1 ml-1">
+                  <AlertCircle size={12} /> {errors.password}
+                </p>
+              )}
+            </div>
 
             {/* BUTTON */}
             <button

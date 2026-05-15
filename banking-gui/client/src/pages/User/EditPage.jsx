@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import euiLogo from '../../assets/EUI-Cropped.jpg'; // Make sure this path is correct
+import { AlertCircle } from 'lucide-react';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
+import {
+  validateName, validateEmail, validateEgyptianPhone,
+  validatePassword, validateConfirmPassword
+} from '../../utils/validation.js';
 
 export default function EditProfilePage() {
 
@@ -9,6 +14,10 @@ export default function EditProfilePage() {
 
   // Navigation State
   const [activeTab, setActiveTab] = useState('personal');
+  const [personalError, setPersonalError] = useState('');
+  const [securityError, setSecurityError] = useState('');
+  const [personalSuccess, setPersonalSuccess] = useState('');
+  const [securitySuccess, setSecuritySuccess] = useState('');
 
   // Form State
   const [personalData, setPersonalData] = useState({
@@ -27,10 +36,116 @@ export default function EditProfilePage() {
     confirmPassword: '',
   });
 
+  // Personal info validation
+  const [personalErrors, setPersonalErrors] = useState({
+    firstName: '', lastName: '', email: '', phone: '',
+    street: '', city: '', governorate: ''
+  });
+  const [personalTouched, setPersonalTouched] = useState({});
+
+  // Security validation
+  const [secErrors, setSecErrors] = useState({
+    currentPassword: '', newPassword: '', confirmPassword: ''
+  });
+  const [secTouched, setSecTouched] = useState({});
+
+  const validatePersonalField = (name, value) => {
+    switch (name) {
+      case 'firstName': return validateName(value, 'First name');
+      case 'lastName': return validateName(value, 'Last name');
+      case 'email': return validateEmail(value);
+      case 'phone': return value.trim() === '' ? '' : validateEgyptianPhone(value);
+      case 'street': return value.trim() ? '' : 'Street address is required.';
+      case 'city': return value.trim() ? '' : 'City is required.';
+      case 'governorate': return value.trim() ? '' : 'Governorate is required.';
+      default: return '';
+    }
+  };
+
+  const getPersonalClass = (name) => {
+    const hasError = personalErrors[name] && personalTouched[name];
+    return `w-full px-4 py-3 rounded-xl border outline-none font-semibold transition-all focus:bg-white focus:ring-2 focus:outline-none ${
+      hasError
+        ? 'bg-red-50 border-red-300 focus:ring-red-400'
+        : 'bg-gray-50 border-gray-200 focus:ring-[#004a99]'
+    }`;
+  };
+
+  const handlePersonalBlur = (name) => {
+    setPersonalTouched({ ...personalTouched, [name]: true });
+    setPersonalErrors({ ...personalErrors, [name]: validatePersonalField(name, personalData[name]) });
+  };
+
+  const handlePersonalChange = (name, value) => {
+    setPersonalData({ ...personalData, [name]: value });
+    if (personalTouched[name]) {
+      setPersonalErrors({ ...personalErrors, [name]: validatePersonalField(name, value) });
+    }
+  };
+
+  const validateSecField = (name, value) => {
+    switch (name) {
+      case 'currentPassword': return value ? '' : 'Current password is required.';
+      case 'newPassword': return validatePassword(value, 'New password');
+      case 'confirmPassword': return validateConfirmPassword(securityData.newPassword, value);
+      default: return '';
+    }
+  };
+
+  const getSecClass = (name) => {
+    const hasError = secErrors[name] && secTouched[name];
+    return `w-full px-4 py-3 rounded-xl border outline-none font-semibold transition-all ${
+      hasError
+        ? 'bg-red-50 border-red-300 focus:ring-2 focus:ring-red-400'
+        : 'bg-gray-50 border-gray-200 focus:ring-2 focus:ring-[#004a99]'
+    }`;
+  };
+
+  const handleSecBlur = (name) => {
+    setSecTouched({ ...secTouched, [name]: true });
+    setSecErrors({ ...secErrors, [name]: validateSecField(name, securityData[name]) });
+  };
+
+  const handleSecChange = (name, value) => {
+    const newData = { ...securityData, [name]: value };
+    setSecurityData(newData);
+    if (secTouched[name]) {
+      setSecErrors({ ...secErrors, [name]: validateSecField(name, value) });
+    }
+    // Re-validate confirmPassword when newPassword changes
+    if (name === 'newPassword' && secTouched.confirmPassword && newData.confirmPassword) {
+      setSecErrors(prev => ({
+        ...prev,
+        confirmPassword: validateConfirmPassword(value, newData.confirmPassword)
+      }));
+    }
+  };
+
   // ---------------- PERSONAL INFO SAVE ----------------
   const handlePersonalSave = async (e) => {
 
     e.preventDefault();
+    setPersonalError('');
+    setPersonalSuccess('');
+
+    // Validate all fields
+    const fields = ['firstName', 'lastName', 'email', 'street', 'city', 'governorate'];
+    const newErrors = {};
+    let hasError = false;
+    fields.forEach(name => {
+      const err = validatePersonalField(name, personalData[name]);
+      newErrors[name] = err;
+      if (err) hasError = true;
+    });
+    // Phone is optional but validate if filled
+    const phoneErr = validatePersonalField('phone', personalData.phone);
+    newErrors.phone = phoneErr;
+    if (phoneErr) hasError = true;
+
+    setPersonalErrors(newErrors);
+    setPersonalTouched(Object.fromEntries([...fields, 'phone'].map(f => [f, true])));
+
+    if (hasError) return;
 
     const storedUser = JSON.parse(
       localStorage.getItem("user")
@@ -64,13 +179,12 @@ export default function EditProfilePage() {
         JSON.stringify(updatedUser)
       );
 
-      alert("Personal information updated successfully!");
+      setPersonalSuccess("Personal information updated successfully!");
 
     } catch (err) {
 
       console.error(err);
-
-      alert(
+      setPersonalError(
         err.response?.data?.message ||
         "Failed to update information"
       );
@@ -82,14 +196,22 @@ export default function EditProfilePage() {
   const handleSecuritySave = async (e) => {
 
     e.preventDefault();
+    setSecurityError('');
+    setSecuritySuccess('');
 
-    if (
-      securityData.newPassword !==
-      securityData.confirmPassword
-    ) {
-      alert("New passwords do not match!");
-      return;
-    }
+    // Validate all fields
+    const fields = ['currentPassword', 'newPassword', 'confirmPassword'];
+    const newErrors = {};
+    let hasError = false;
+    fields.forEach(name => {
+      const err = validateSecField(name, securityData[name]);
+      newErrors[name] = err;
+      if (err) hasError = true;
+    });
+    setSecErrors(newErrors);
+    setSecTouched(Object.fromEntries(fields.map(f => [f, true])));
+
+    if (hasError) return;
 
     const storedUser = JSON.parse(
       localStorage.getItem("user")
@@ -108,7 +230,7 @@ export default function EditProfilePage() {
         }
       );
 
-      alert(response.data.message);
+      setSecuritySuccess(response.data.message);
 
       setSecurityData({
         currentPassword: '',
@@ -119,8 +241,7 @@ export default function EditProfilePage() {
     } catch (err) {
 
       console.error(err);
-
-      alert(
+      setSecurityError(
         err.response?.data?.message ||
         "Password update failed"
       );
@@ -268,44 +389,58 @@ export default function EditProfilePage() {
 
                     <form onSubmit={handlePersonalSave} className="space-y-6">
 
+                      {personalSuccess && (
+                        <div className="flex items-center gap-2 p-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100">
+                          <AlertCircle size={18} />
+                          <span className="text-sm font-medium">{personalSuccess}</span>
+                        </div>
+                      )}
+
+                      {personalError && (
+                        <div className="flex items-center gap-2 p-4 bg-red-50 text-red-600 rounded-2xl border border-red-100">
+                          <AlertCircle size={18} />
+                          <span className="text-sm font-medium">{personalError}</span>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
 
                         <div>
                           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                             First Name
                           </label>
-
                           <input
                             type="text"
                             required
                             value={personalData.firstName}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                firstName: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                            onChange={(e) => handlePersonalChange('firstName', e.target.value)}
+                            onBlur={() => handlePersonalBlur('firstName')}
+                            className={getPersonalClass('firstName')}
                           />
+                          {personalErrors.firstName && personalTouched.firstName && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.firstName}
+                            </p>
+                          )}
                         </div>
 
                         <div>
                           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                             Last Name
                           </label>
-
                           <input
                             type="text"
                             required
                             value={personalData.lastName}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                lastName: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                            onChange={(e) => handlePersonalChange('lastName', e.target.value)}
+                            onBlur={() => handlePersonalBlur('lastName')}
+                            className={getPersonalClass('lastName')}
                           />
+                          {personalErrors.lastName && personalTouched.lastName && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.lastName}
+                            </p>
+                          )}
                         </div>
 
                       </div>
@@ -316,19 +451,38 @@ export default function EditProfilePage() {
                           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                             Email Address
                           </label>
-
                           <input
                             type="email"
                             required
                             value={personalData.email}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                email: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                            onChange={(e) => handlePersonalChange('email', e.target.value)}
+                            onBlur={() => handlePersonalBlur('email')}
+                            className={getPersonalClass('email')}
                           />
+                          {personalErrors.email && personalTouched.email && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.email}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                            Phone (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={personalData.phone}
+                            onChange={(e) => handlePersonalChange('phone', e.target.value)}
+                            onBlur={() => handlePersonalBlur('phone')}
+                            className={getPersonalClass('phone')}
+                            placeholder="01012345678"
+                          />
+                          {personalErrors.phone && personalTouched.phone && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.phone}
+                            </p>
+                          )}
                         </div>
 
                       </div>
@@ -339,70 +493,68 @@ export default function EditProfilePage() {
                           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                             Street
                           </label>
-
                           <input
                             type="text"
                             required
                             value={personalData.street}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                street: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                            onChange={(e) => handlePersonalChange('street', e.target.value)}
+                            onBlur={() => handlePersonalBlur('street')}
+                            className={getPersonalClass('street')}
                           />
+                          {personalErrors.street && personalTouched.street && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.street}
+                            </p>
+                          )}
                         </div>
 
                         <div>
                           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                             City
                           </label>
-
                           <input
                             type="text"
                             required
                             value={personalData.city}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                city: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                            onChange={(e) => handlePersonalChange('city', e.target.value)}
+                            onBlur={() => handlePersonalBlur('city')}
+                            className={getPersonalClass('city')}
                           />
+                          {personalErrors.city && personalTouched.city && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.city}
+                            </p>
+                          )}
                         </div>
 
                         <div>
                           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                             Governorate
                           </label>
-
                           <input
                             type="text"
                             required
                             value={personalData.governorate}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                governorate: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                            onChange={(e) => handlePersonalChange('governorate', e.target.value)}
+                            onBlur={() => handlePersonalBlur('governorate')}
+                            className={getPersonalClass('governorate')}
                           />
+                          {personalErrors.governorate && personalTouched.governorate && (
+                            <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {personalErrors.governorate}
+                            </p>
+                          )}
                         </div>
 
                       </div>
 
                       <div className="pt-4 flex justify-end">
-
                         <button
                           type="submit"
                           className="py-3 px-8 bg-[#004a99] text-white font-bold rounded-xl shadow-md hover:bg-[#003d7a] transition-all active:scale-95"
                         >
                           Save Changes
                         </button>
-
                       </div>
 
                     </form>
@@ -426,72 +578,81 @@ export default function EditProfilePage() {
 
                     <form onSubmit={handleSecuritySave} className="space-y-6 max-w-lg">
 
+                      {securitySuccess && (
+                        <div className="flex items-center gap-2 p-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100">
+                          <AlertCircle size={18} />
+                          <span className="text-sm font-medium">{securitySuccess}</span>
+                        </div>
+                      )}
+
+                      {securityError && (
+                        <div className="flex items-center gap-2 p-4 bg-red-50 text-red-600 rounded-2xl border border-red-100">
+                          <AlertCircle size={18} />
+                          <span className="text-sm font-medium">{securityError}</span>
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                           Current Password
                         </label>
-
                         <input
                           type="password"
                           required
                           value={securityData.currentPassword}
-                          onChange={(e) =>
-                            setSecurityData({
-                              ...securityData,
-                              currentPassword: e.target.value
-                            })
-                          }
-                          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                          onChange={(e) => handleSecChange('currentPassword', e.target.value)}
+                          onBlur={() => handleSecBlur('currentPassword')}
+                          className={getSecClass('currentPassword')}
                           placeholder="••••••••"
                         />
+                        {secErrors.currentPassword && secTouched.currentPassword && (
+                          <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                            <AlertCircle size={12} /> {secErrors.currentPassword}
+                          </p>
+                        )}
                       </div>
 
                       <div className="border-t border-gray-100 pt-6 mt-6">
-
                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                           New Password
                         </label>
-
                         <input
                           type="password"
                           required
                           value={securityData.newPassword}
-                          onChange={(e) =>
-                            setSecurityData({
-                              ...securityData,
-                              newPassword: e.target.value
-                            })
-                          }
-                          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                          onChange={(e) => handleSecChange('newPassword', e.target.value)}
+                          onBlur={() => handleSecBlur('newPassword')}
+                          className={getSecClass('newPassword')}
                           placeholder="••••••••"
                         />
-
+                        {secErrors.newPassword && secTouched.newPassword && (
+                          <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                            <AlertCircle size={12} /> {secErrors.newPassword}
+                          </p>
+                        )}
                       </div>
 
                       <div>
-
                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                           Confirm New Password
                         </label>
-
                         <input
                           type="password"
                           required
                           value={securityData.confirmPassword}
-                          onChange={(e) =>
-                            setSecurityData({
-                              ...securityData,
-                              confirmPassword: e.target.value
-                            })
-                          }
-                          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
+                          onChange={(e) => handleSecChange('confirmPassword', e.target.value)}
+                          onBlur={() => handleSecBlur('confirmPassword')}
+                          className={getSecClass('confirmPassword')}
                           placeholder="••••••••"
                         />
-
+                        {secErrors.confirmPassword && secTouched.confirmPassword && (
+                          <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                            <AlertCircle size={12} /> {secErrors.confirmPassword}
+                          </p>
+                        )}
                       </div>
 
                       <div className="pt-4 flex justify-start">
-
                         <button
                           type="submit"
                           disabled={
@@ -502,7 +663,6 @@ export default function EditProfilePage() {
                         >
                           Update Password
                         </button>
-
                       </div>
 
                     </form>

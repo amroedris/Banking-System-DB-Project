@@ -113,6 +113,11 @@ export default function CustomerDetails() {
             <div className="space-y-4 text-left border-t border-gray-50 pt-6">
               <InfoRow icon={<Mail size={16}/>} label="Email" value={customer.EMAIL} />
               <InfoRow icon={<Phone size={16}/>} label="Phone" value={customer.CUSTOMER_PHONE || 'N/A'} />
+              {customer.PHONES && customer.PHONES.length > 1 && customer.PHONES.map((phone, idx) => (
+                idx === 0 ? null : (
+                  <InfoRow key={idx} icon={<Phone size={16}/>} label={`Phone ${idx + 1}`} value={phone} />
+                )
+              ))}
               <InfoRow icon={<MapPin size={16}/>} label="Address" value={`${customer.STREET || ''}, ${customer.CITY || ''}`} />
             </div>
           </div>
@@ -168,14 +173,7 @@ export default function CustomerDetails() {
                             <Snowflake size={18} />
                           </button>
 
-                          <button
-                            onClick={() => closeAccount(acc.ACCOUNT_NUMBER)}
-                            disabled={Number(acc.BALANCE) > 0}
-                            className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={Number(acc.BALANCE) > 0 ? "Clear balance before closing" : "Close Account"}
-                          >
-                            <Trash2 size={18} />
-                          </button>
+              
                         </div>
                       </div>
 
@@ -280,6 +278,7 @@ export default function CustomerDetails() {
         <AddAccountForCustomer 
           customerId={customer.CUSTOMER_ID}
           customerName={`${customer.FIRST_NAME} ${customer.LAST_NAME}`}
+          customerDob={customer.DOB} /* <-- PASS THE DOB HERE */
           onClose={() => setIsAccountModalOpen(false)}
           onSuccess={() => fetchDetails()} 
         />

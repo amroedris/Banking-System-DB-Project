@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { AlertCircle } from 'lucide-react';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function TransferPage() {
@@ -13,6 +14,8 @@ export default function TransferPage() {
   const [recipientName, setRecipientName] = useState('');
   const [recipientAccountNumber, setRecipientAccountNumber] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({ amount: '', recipientName: '', recipientAccount: '' });
+  const [touched, setTouched] = useState({ amount: false, recipientName: false, recipientAccount: false });
 
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem("user"));
@@ -41,17 +44,48 @@ export default function TransferPage() {
 
   const isFromAccountRestricted = selectedFromAccount?.STATUS !== 'Active';
 
+  const validateAmountField = (val) => {
+    if (!val || val.trim() === '') return 'Amount is required.';
+    const num = Number(val);
+    if (isNaN(num) || num <= 0) return 'Amount must be a positive number.';
+    if (selectedFromAccount && num > Number(selectedFromAccount.BALANCE)) {
+      return `Amount cannot exceed your balance of $${Number(selectedFromAccount.BALANCE).toLocaleString(undefined, { minimumFractionDigits: 2 })}.`;
+    }
+    return '';
+  };
+
+  const validateRecipientName = (name) => {
+    if (!name || name.trim() === '') return 'Recipient name is required.';
+    return '';
+  };
+
+  const validateRecipientAccount = (acc) => {
+    if (!acc || acc.trim() === '') return 'Recipient account number is required.';
+    if (!/^\d+$/.test(acc.trim())) return 'Account number must contain only digits.';
+    return '';
+  };
+
   const handleTransfer = async (e) => {
     e.preventDefault();
+
+    // Validate based on transfer type
+    const amtErr = validateAmountField(amount);
+    let nameErr = '';
+    let accErr = '';
+    
+    if (transferType === 'external') {
+      nameErr = validateRecipientName(recipientName);
+      accErr = validateRecipientAccount(recipientAccountNumber);
+    }
+    
+    setErrors({ amount: amtErr, recipientName: nameErr, recipientAccount: accErr });
+    setTouched({ amount: true, recipientName: true, recipientAccount: true });
+    
+    if (amtErr || nameErr || accErr) return;
 
     const finalToAccount = transferType === 'external'
       ? recipientAccountNumber
       : toAccount;
-
-    if (!finalToAccount) {
-      alert("Please select or enter a recipient account.");
-      return;
-    }
 
     if (String(fromAccount) === String(finalToAccount)) {
       alert("You cannot transfer to the same account.");
@@ -204,9 +238,25 @@ export default function TransferPage() {
                     placeholder="e.g. John Smith"
                     required
                     value={recipientName}
-                    onChange={e => setRecipientName(e.target.value)}
-                    className="w-full p-3.5 border border-gray-300 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#004a99]"
+                    onChange={e => {
+                      setRecipientName(e.target.value);
+                      if (touched.recipientName) setErrors({...errors, recipientName: validateRecipientName(e.target.value)});
+                    }}
+                    onBlur={() => {
+                      setTouched({...touched, recipientName: true});
+                      setErrors({...errors, recipientName: validateRecipientName(recipientName)});
+                    }}
+                    className={`w-full p-3.5 border rounded-xl font-medium focus:outline-none focus:ring-2 ${
+                      errors.recipientName && touched.recipientName
+                        ? 'border-red-300 bg-red-50 focus:ring-red-400'
+                        : 'border-gray-300 focus:ring-[#004a99]'
+                    }`}
                   />
+                  {errors.recipientName && touched.recipientName && (
+                    <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                      <AlertCircle size={12} /> {errors.recipientName}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 uppercase tracking-wider mb-2">
@@ -217,9 +267,25 @@ export default function TransferPage() {
                     placeholder="e.g. 100123456"
                     required
                     value={recipientAccountNumber}
-                    onChange={e => setRecipientAccountNumber(e.target.value)}
-                    className="w-full p-3.5 border border-gray-300 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#004a99]"
+                    onChange={e => {
+                      setRecipientAccountNumber(e.target.value);
+                      if (touched.recipientAccount) setErrors({...errors, recipientAccount: validateRecipientAccount(e.target.value)});
+                    }}
+                    onBlur={() => {
+                      setTouched({...touched, recipientAccount: true});
+                      setErrors({...errors, recipientAccount: validateRecipientAccount(recipientAccountNumber)});
+                    }}
+                    className={`w-full p-3.5 border rounded-xl font-medium focus:outline-none focus:ring-2 ${
+                      errors.recipientAccount && touched.recipientAccount
+                        ? 'border-red-300 bg-red-50 focus:ring-red-400'
+                        : 'border-gray-300 focus:ring-[#004a99]'
+                    }`}
                   />
+                  {errors.recipientAccount && touched.recipientAccount && (
+                    <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                      <AlertCircle size={12} /> {errors.recipientAccount}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -238,10 +304,26 @@ export default function TransferPage() {
                   placeholder="0.00"
                   required
                   value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                  className="w-full pl-10 pr-4 py-4 border-2 border-gray-200 rounded-xl text-2xl font-black focus:outline-none focus:ring-2 focus:ring-[#004a99] bg-white"
+                  onChange={e => {
+                    setAmount(e.target.value);
+                    if (touched.amount) setErrors({...errors, amount: validateAmountField(e.target.value)});
+                  }}
+                  onBlur={() => {
+                    setTouched({...touched, amount: true});
+                    setErrors({...errors, amount: validateAmountField(amount)});
+                  }}
+                  className={`w-full pl-10 pr-4 py-4 border-2 rounded-xl text-2xl font-black focus:outline-none focus:ring-2 bg-white ${
+                    errors.amount && touched.amount
+                      ? 'border-red-300 focus:ring-red-400 bg-red-50'
+                      : 'border-gray-200 focus:ring-[#004a99]'
+                  }`}
                 />
               </div>
+              {errors.amount && touched.amount && (
+                <p className="text-xs text-red-500 font-medium mt-2 flex items-center gap-1">
+                  <AlertCircle size={12} /> {errors.amount}
+                </p>
+              )}
             </div>
 
             {/* Submit */}

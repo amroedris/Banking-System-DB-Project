@@ -6,6 +6,18 @@ require("dotenv").config();
 
 const app = express();
 
+// Utility function to calculate age from DOB
+const calculateAge = (dob) => {
+  const birthDate = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+};
+
 app.use(cors());
 app.use(express.json());
 
@@ -524,20 +536,60 @@ app.get("/loans/:customerId", async (req, res) => {
   }
 
 });
-// APPLY FOR NEW LOAN
+
 // APPLY FOR NEW LOAN
 app.post("/loans/apply", async (req, res) => {
   const { customerId, amount, term, interestRate } = req.body;
-
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
 
+    // --- RULE 1: AGE CHECK (Must be 18+) ---
+    const customerRes = await connection.execute(
+      `SELECT dob FROM customer WHERE customer_id = :cid`,
+      { cid: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (customerRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Customer not found." });
+    }
+
+    const dob = customerRes.rows[0].DOB;
+    if (dob) {
+      const age = calculateAge(dob);
+      if (age < 18) {
+        return res.status(400).json({
+          success: false,
+          message: "Application Denied: You must be at least 18 years old to apply for a loan."
+        });
+      }
+    }
+
+    // --- RULE 2: MUST HAVE AN ACTIVE ACCOUNT ---
+    const accountCheck = await connection.execute(
+      `SELECT COUNT(*) AS active_count 
+       FROM customer_account ca
+       JOIN account a ON ca.account_number = a.account_number
+       WHERE ca.customer_id = :cid AND a.status = 'Active'`,
+      { cid: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (accountCheck.rows[0].ACTIVE_COUNT === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Application Denied: You must have at least one active bank account to receive loan funds." 
+      });
+    }
+
+
+
+    // --- ALL CHECKS PASSED: PROCESS THE LOAN ---
+    
     // Total amount INCLUDING interest
-    const totalAmount =
-      Number(amount) +
-      (Number(amount) * Number(interestRate) / 100);
+    const totalAmount = Number(amount) + (Number(amount) * Number(interestRate) / 100);
 
     // Monthly installment
     const monthlyPayment = totalAmount / Number(term);
@@ -580,23 +632,17 @@ app.post("/loans/apply", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Loan approved!"
+      message: "Loan application submitted successfully! It is now pending staff review."
     });
 
   } catch (err) {
-
     console.error(err);
-
     res.status(500).json({
       success: false,
-      message: err.message
+      message: "Database Error: " + err.message
     });
-
   } finally {
-
-    if (connection)
-      await connection.close();
-
+    if (connection) await connection.close();
   }
 });
 
@@ -771,24 +817,21 @@ app.get("/customer/:customerId", async (req, res) => {
 
     connection = await oracledb.getConnection(dbConfig);
 
-const result = await connection.execute(
-  `
-  SELECT
-      c.first_name,
-      c.last_name,
-      c.email,
-      c.street,
-      c.city,
-      c.governorate,
-      cp.customer_phone AS phone
-  FROM customer c
-  LEFT JOIN customer_phone cp
-    ON c.customer_id = cp.customer_id
-  WHERE c.customer_id = :id
-  `,
-  [customerId],
-  { outFormat: oracledb.OUT_FORMAT_OBJECT }
-);
+    const result = await connection.execute(
+      `
+      SELECT
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.street,
+          c.city,
+          c.governorate
+      FROM customer c
+      WHERE c.customer_id = :id
+      `,
+      [customerId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -796,7 +839,21 @@ const result = await connection.execute(
       });
     }
 
-    res.json(result.rows[0]);
+    // Fetch phone numbers separately
+    const phoneResult = await connection.execute(
+      `SELECT customer_phone FROM customer_phone WHERE customer_id = :id`,
+      [customerId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    const customerData = result.rows[0];
+    const phones = phoneResult.rows.map(row => String(row.CUSTOMER_PHONE));
+
+    res.json({
+      ...customerData,
+      PHONE: phones.length > 0 ? phones[0] : '',
+      PHONES: phones
+    });
 
   } catch (err) {
 
@@ -820,7 +877,6 @@ app.put("/customer/:customerId", async (req, res) => {
     firstName,
     lastName,
     email,
-    phone,
     street,
     city,
     governorate
@@ -856,35 +912,44 @@ app.put("/customer/:customerId", async (req, res) => {
       }
     );
 
-// Only touch CUSTOMER_PHONE if a phone value was actually provided
-if (phone && String(phone).trim() !== '') {
-  
-  // Check if phone belongs to another customer
-  const duplicatePhone = await connection.execute(
-    `SELECT CUSTOMER_ID FROM CUSTOMER_PHONE
-     WHERE CUSTOMER_PHONE = :phone AND CUSTOMER_ID != :customerId`,
-    { phone, customerId },
-    { outFormat: oracledb.OUT_FORMAT_OBJECT }
-  );
-
-  if (duplicatePhone.rows.length > 0) {
-    await connection.rollback(); // ← rollback the Customer UPDATE too
-    return res.status(400).json({ message: "Phone number already used by another customer" });
-  }
-
-  // Delete old entry (if any) then insert new one
-  await connection.execute(
-    `DELETE FROM CUSTOMER_PHONE WHERE CUSTOMER_ID = :customerId`,
-    { customerId }
-  );
-
-  await connection.execute(
-    `INSERT INTO CUSTOMER_PHONE (CUSTOMER_ID, CUSTOMER_PHONE) VALUES (:customerId, :phone)`,
-    { customerId, phone }
-  );
-}
-
-await connection.commit();
+    // Handle phone numbers - delete old ones and insert new ones
+    // Frontend sends `phones` array or `phone` singular for backward compatibility
+    const phonesInput = req.body.phones || (req.body.phone ? [req.body.phone] : null);
+    
+    if (phonesInput && Array.isArray(phonesInput)) {
+      const validPhones = phonesInput.filter(p => p && String(p).trim() !== '');
+      
+      if (validPhones.length > 0) {
+        // Check for duplicates across other customers
+        for (const phone of validPhones) {
+          const dupCheck = await connection.execute(
+            `SELECT customer_id FROM customer_phone WHERE customer_phone = :phone AND customer_id != :customerId`,
+            { phone: String(phone).trim(), customerId },
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          );
+          if (dupCheck.rows.length > 0) {
+            await connection.rollback();
+            return res.status(400).json({ message: `Phone number ${String(phone).trim()} is already used by another customer.` });
+          }
+        }
+        
+        // Delete old phone entries
+        await connection.execute(
+          `DELETE FROM CUSTOMER_PHONE WHERE CUSTOMER_ID = :customerId`,
+          { customerId }
+        );
+        
+        // Insert new phone numbers
+        for (const phone of validPhones) {
+          await connection.execute(
+            `INSERT INTO CUSTOMER_PHONE (CUSTOMER_ID, CUSTOMER_PHONE) VALUES (:customerId, :phone)`,
+            { customerId, phone: String(phone).trim() }
+          );
+        }
+      }
+    }
+    
+    await connection.commit();
 
     res.json({
       message: "Customer information updated"
@@ -989,17 +1054,19 @@ app.post("/staff-login", async (req, res) => {
     const result = await connection.execute(
       `
       SELECT
-        employee_id,
-        first_name,
-        last_name,
-        email,
-        branch_id,
-        job_id,
-        dep_id,
-        username
-      FROM employees
-      WHERE username = :us
-      AND password = :pass
+        e.employee_id,
+        e.first_name,
+        e.last_name,
+        e.email,
+        e.branch_id,
+        e.job_id,
+        e.dep_id,
+        e.username,
+        j.job_title
+      FROM employees e
+      LEFT JOIN jobs j ON e.job_id = j.job_id
+      WHERE e.username = :us
+      AND e.password = :pass
       `,
       { us, pass },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -1046,7 +1113,7 @@ app.get("/admin/stats", async (req, res) => {
     connection = await oracledb.getConnection(dbConfig);
 
     const liquidityResult = await connection.execute(
-      `SELECT NVL(SUM(balance), 0) AS TOTAL FROM account`,
+      `SELECT balance AS TOTAL FROM account WHERE account_number = 0`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
@@ -1130,7 +1197,7 @@ app.get("/approvals", async (req, res) => {
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    // Pending loans
+    // 1. Pending loans
     const loansResult = await connection.execute(
       `SELECT
         l.loan_id   AS ID,
@@ -1144,7 +1211,7 @@ app.get("/approvals", async (req, res) => {
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // Pending cards
+    // 2. Pending cards
     const cardsResult = await connection.execute(
       `SELECT
         cd.card_id   AS ID,
@@ -1159,15 +1226,25 @@ app.get("/approvals", async (req, res) => {
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // Total loans applied today (unchanged)
-    const countResult = await connection.execute(
-      `SELECT COUNT(*) AS TOTAL FROM loan WHERE TRUNC(start_date) = TRUNC(SYSDATE)`,
+    // 3. Count total loans requested today
+    const loanCountResult = await connection.execute(
+      `SELECT COUNT(*) AS TOTAL FROM loan 
+       WHERE status = 'Pending'`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
+    // 4. Count total cards requested today
+    const cardCountResult = await connection.execute(
+      `SELECT COUNT(*) AS TOTAL FROM card 
+       WHERE card_status = 'Pending'`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+
     res.json({
       requests: [...loansResult.rows, ...cardsResult.rows],
-      totalToday: countResult.rows[0].TOTAL
+      totalLoans: loanCountResult.rows[0].TOTAL,
+      totalCards: cardCountResult.rows[0].TOTAL
     });
 
   } catch (err) {
@@ -1178,57 +1255,126 @@ app.get("/approvals", async (req, res) => {
   }
 });
 
+// ==========================================
+// PROCESS LOAN APPROVAL / REJECTION
+// ==========================================
 app.put("/approvals/:loanId", async (req, res) => {
-
   const { loanId } = req.params;
-
   const { action } = req.body;
-
   let connection;
 
   try {
-
     connection = await oracledb.getConnection(dbConfig);
+    const newStatus = action === "approve" ? "Approved" : "Rejected";
 
-    let newStatus;
+    // 1. Get the loan amount and the customer who applied
+    const loanResult = await connection.execute(
+      `SELECT customer_id, loan_amount FROM loan WHERE loan_id = :loanId`,
+      { loanId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
 
-    if (action === "approve") {
-      newStatus = "Approved";
-    } else {
-      newStatus = "Rejected";
+    if (loanResult.rows.length === 0) {
+      return res.status(404).json({ message: "Loan not found" });
     }
 
-    await connection.execute(
-      `
-      UPDATE loan
-      SET status = :status
-      WHERE loan_id = :loanId
-      `,
-      {
-        status: newStatus,
-        loanId
-      },
-      { autoCommit: true }
-    );
+    const { CUSTOMER_ID, LOAN_AMOUNT } = loanResult.rows[0];
+
+    // --- IF REJECTED ---
+    if (newStatus === "Rejected") {
+      await connection.execute(
+        `UPDATE loan SET status = 'Rejected' WHERE loan_id = :loanId`,
+        { loanId }
+      );
+      await connection.commit();
+      return res.json({ success: true, message: "Loan Rejected" });
+    }
+
+    // --- IF APPROVED ---
+    if (newStatus === "Approved") {
+      
+      // 2. CHECK BANK LIQUIDITY FIRST (Account 0)
+      const reserveResult = await connection.execute(
+        `SELECT balance FROM account WHERE account_number = 0`,
+        [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (reserveResult.rows.length === 0) {
+        return res.status(500).json({ message: "CRITICAL: Bank Reserve account not found." });
+      }
+
+      const reserveBalance = reserveResult.rows[0].BALANCE;
+      
+      // Prevent approval if the bank is broke!
+      if (reserveBalance < LOAN_AMOUNT) {
+        return res.status(400).json({ 
+          message: `Insufficient Bank Liquidity! Vault has $${reserveBalance.toLocaleString()}, but loan requires $${LOAN_AMOUNT.toLocaleString()}.` 
+        });
+      }
+
+      // 3. Find one of the customer's active accounts to deposit into
+      const accountResult = await connection.execute(
+        `SELECT a.account_number 
+         FROM customer_account ca
+         JOIN account a ON ca.account_number = a.account_number
+         WHERE ca.customer_id = :customerId AND a.status = 'Active'
+         AND ROWNUM = 1`, 
+        { customerId: CUSTOMER_ID },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (accountResult.rows.length === 0) {
+        return res.status(400).json({ message: "Customer has no active accounts to receive the loan funds." });
+      }
+      
+      const targetAccount = accountResult.rows[0].ACCOUNT_NUMBER;
+
+      // 4. Update the loan status to Approved
+      await connection.execute(
+        `UPDATE loan SET status = 'Approved' WHERE loan_id = :loanId`,
+        { loanId }
+      );
+
+      // 5. Deduct funds from the Bank Vault
+      await connection.execute(
+        `UPDATE account SET balance = balance - :amount WHERE account_number = 0`,
+        { amount: LOAN_AMOUNT }
+      );
+
+      // 6. Deposit funds to the Customer Account
+      await connection.execute(
+        `UPDATE account SET balance = balance + :amount WHERE account_number = :accNum`,
+        { amount: LOAN_AMOUNT, accNum: targetAccount }
+      );
+
+      // 7. Log the official Bank Transfer
+      await connection.execute(
+        `INSERT INTO bank_transaction (
+            transaction_id, transaction_type, amount, transaction_time,
+            sender_account_number, receiver_account_number, status
+         ) VALUES (
+            transaction_seq.NEXTVAL, 'Transfer', :amount, SYSDATE, 0, :accNum, 'Completed'
+         )`,
+        { amount: LOAN_AMOUNT, accNum: targetAccount }
+      );
+    }
+
+    // 8. Save all changes permanently
+    await connection.commit();
 
     res.json({
       success: true,
-      message: `Loan ${newStatus}`
+      message: `Loan Approved. Funds transferred from vault.`
     });
 
   } catch (err) {
-
     console.error(err);
-
+    // Safety Net: Roll back all money movements if any query fails!
+    if (connection) await connection.rollback();
     res.status(500).send(err.message);
-
   } finally {
-
-    if (connection)
-      await connection.close();
-
+    if (connection) await connection.close();
   }
-
 });
 
 app.put("/approvals/card/:cardId", async (req, res) => {
@@ -1239,15 +1385,23 @@ app.put("/approvals/card/:cardId", async (req, res) => {
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    const newStatus = action === "approve" ? "Active" : "Suspended";
-
-    await connection.execute(
-      `UPDATE card SET card_status = :status WHERE card_id = :cardId`,
-      { status: newStatus, cardId },
-      { autoCommit: true }
-    );
-
-    res.json({ success: true, message: `Card ${newStatus}` });
+    if (action === "reject") {
+      // Fully delete the card request from the database upon rejection
+      await connection.execute(
+        `DELETE FROM card WHERE card_id = :cardId`,
+        { cardId },
+        { autoCommit: true }
+      );
+      res.json({ success: true, message: "Card request deleted (rejected)" });
+    } else {
+      // Approve — set status to Active
+      await connection.execute(
+        `UPDATE card SET card_status = 'Active' WHERE card_id = :cardId`,
+        { cardId },
+        { autoCommit: true }
+      );
+      res.json({ success: true, message: "Card Approved" });
+    }
 
   } catch (err) {
     console.error(err);
@@ -1259,11 +1413,37 @@ app.put("/approvals/card/:cardId", async (req, res) => {
 
 // GET ALL STAFF (optionally filtered by supervisorId)
 app.get("/staff", async (req, res) => {
-  const { supervisorId } = req.query;
+  const { supervisorId, departmentName, jobTitle } = req.query;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
+
+    // Get requester's job_id, branch_id based on the employee_id provided
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    if (supervisorId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id FROM employees WHERE employee_id = :empId`,
+        { empId: supervisorId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+      }
+    }
+
+    // PERMISSION LOGIC:
+    // JOB_ID = 3 (IT_System_Administrator): God view — see all staff
+    // JOB_ID = 1 (RB_Department_Manager): see their subordinates + themselves
+    // JOB_ID = 2 (RB_Teller): return empty array — page template renders access denied UI
+    // JOB_ID = 4 (RB_Branch_Manager): see only staff in their branch
+
+    // Teller: return empty array instead of 403
+    if (requesterJobId === 2) {
+      return res.json([]);
+    }
 
     let query = `
       SELECT
@@ -1272,16 +1452,59 @@ app.get("/staff", async (req, res) => {
         e.last_name,
         e.email,
         e.supervisor_id,
-        j.job_title
+        e.salary,
+        e.dep_id,
+        e.username,
+        e.branch_id,
+        e.job_id,
+        j.job_title,
+        j.min_salary,
+        j.max_salary,
+        d.dep_name
       FROM employees e
       JOIN jobs j ON e.job_id = j.job_id
+      LEFT JOIN department d ON e.dep_id = d.dep_id
     `;
 
+    const conditions = [];
     const params = {};
 
-    if (supervisorId) {
-      query += ` WHERE e.supervisor_id = :supervisorId OR e.employee_id = :supervisorId`;
+    // Department Supervisor (JOB_ID = 1): only their subordinates + themselves
+    if (requesterJobId === 1) {
+      const supervisorCheckResult = await connection.execute(
+        `SELECT COUNT(*) AS sup_count FROM employees WHERE supervisor_id = :empId`,
+        { empId: supervisorId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      const supervisorCount = supervisorCheckResult.rows[0].SUP_COUNT;
+      if (supervisorCount === 0) {
+        return res.status(403).json({ message: "You don't supervise any employees" });
+      }
+
+      conditions.push(`(e.supervisor_id = :supervisorId OR e.employee_id = :supervisorId)`);
       params.supervisorId = supervisorId;
+    }
+    // Branch Manager (JOB_ID = 4): only staff in their branch
+    else if (requesterJobId === 4) {
+      conditions.push(`e.branch_id = :branchId`);
+      params.branchId = requesterBranchId;
+    }
+    // System Administrator (JOB_ID = 3): no scope restriction, but can filter
+    else if (requesterJobId === 3) {
+      // Admin — apply optional filters
+      if (departmentName) {
+        conditions.push(`LOWER(d.dep_name) LIKE LOWER(:depNamePattern)`);
+        params.depNamePattern = `%${departmentName}%`;
+      }
+      if (jobTitle) {
+        conditions.push(`LOWER(j.job_title) LIKE LOWER(:jobTitlePattern)`);
+        params.jobTitlePattern = `%${jobTitle}%`;
+      }
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
     }
 
     query += ` ORDER BY e.employee_id`;
@@ -1290,7 +1513,35 @@ app.get("/staff", async (req, res) => {
       outFormat: oracledb.OUT_FORMAT_OBJECT
     });
 
-    res.json(result.rows);
+    // Fetch phone numbers for all returned employees
+    const staffRows = result.rows;
+    if (staffRows.length > 0) {
+      const empIds = staffRows.map(r => r.EMPLOYEE_ID);
+      const bindParams = {};
+      empIds.forEach((id, idx) => { bindParams[idx + 1] = id; });
+      const phoneResult = await connection.execute(
+        `SELECT employee_id, employee_phone FROM employee_phone WHERE employee_id IN (${empIds.map((_, i) => ':' + (i + 1)).join(',')}) ORDER BY employee_id`,
+        bindParams,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      // Group phones by employee_id
+      const phoneMap = {};
+      for (const row of phoneResult.rows) {
+        const eid = row.EMPLOYEE_ID;
+        if (!phoneMap[eid]) phoneMap[eid] = [];
+        phoneMap[eid].push(row.EMPLOYEE_PHONE);
+      }
+
+      // Attach PHONES array and PHONE (first) to each staff row
+      for (const row of staffRows) {
+        const phones = phoneMap[row.EMPLOYEE_ID] || [];
+        row.PHONES = phones;
+        row.PHONE = phones.length > 0 ? phones[0] : null;
+      }
+    }
+
+    res.json(staffRows);
 
   } catch (err) {
     console.error(err);
@@ -1300,6 +1551,45 @@ app.get("/staff", async (req, res) => {
   }
 });
 
+// GET ALL JOBS AND THEIR SALARY RANGES
+app.get("/jobs", async (req, res) => {
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    const result = await connection.execute(
+      `SELECT job_id, job_title, min_salary, max_salary FROM jobs`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// GET ALL DEPARTMENTS
+app.get("/departments", async (req, res) => {
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    const result = await connection.execute(
+      `SELECT dep_id, dep_name FROM department ORDER BY dep_name`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+
 // CREATE NEW STAFF MEMBER
 app.post("/staff", async (req, res) => {
   const { firstName, middleName, lastName, email, salary, username, password, role, depId, supervisorId, phones } = req.body;
@@ -1308,25 +1598,48 @@ app.post("/staff", async (req, res) => {
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    // 1. Generate new Employee ID
+    // 1. Resolve role name AND fetch salary constraints
+    const jobResult = await connection.execute(
+      `SELECT job_id, min_salary, max_salary FROM jobs WHERE job_title = :role`,
+            { role: role || 'RB_Teller' },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (jobResult.rows.length === 0) {
+      return res.status(400).json({ success: false, message: `Role "${role}" not found in Jobs table.` });
+    }
+
+    const { JOB_ID, MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+
+    // 2. VALIDATE THE SALARY
+    if (salary < MIN_SALARY || salary > MAX_SALARY) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Salary violation: For a ${role}, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
+      });
+    }
+
+    // 3. Generate new Employee ID
     const maxResult = await connection.execute(
       `SELECT NVL(MAX(employee_id), 1000) + 1 AS next_id FROM employees`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     const newEmployeeId = maxResult.rows[0].NEXT_ID;
 
-    // 2. Resolve role name → job_id
-    const jobIdResult = await connection.execute(
-      `SELECT job_id FROM jobs WHERE job_title = :role`,
-      { role: role || 'Teller' },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    if (jobIdResult.rows.length === 0) {
-      return res.status(400).json({ success: false, message: `Role "${role}" not found in Jobs table.` });
+    // 4. Inherit department if needed
+    let departmentId = depId;
+    if (!departmentId && supervisorId) {
+      const supervisorResult = await connection.execute(
+        `SELECT dep_id FROM employees WHERE employee_id = :empId`,
+        { empId: supervisorId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      departmentId = (supervisorResult.rows.length > 0 && supervisorResult.rows[0].DEP_ID) ? supervisorResult.rows[0].DEP_ID : 10;
+    } else if (!departmentId) {
+      departmentId = 10;
     }
-    const resolvedJobId = jobIdResult.rows[0].JOB_ID;
 
-    // 3. Insert the employee
+    // 5. Insert the employee
     await connection.execute(
       `INSERT INTO employees (
         employee_id, first_name, middle_name, last_name, email,
@@ -1335,31 +1648,29 @@ app.post("/staff", async (req, res) => {
       ) VALUES (
         :employeeId, :firstName, :middleName, :lastName, :email,
         :salary, SYSDATE, :username, :password,
-        :branchId, :jobId, :depId, :supervisorId
+        101, :jobId, :depId, :supervisorId
       )`,
       {
-        employeeId:   newEmployeeId,
+        employeeId: newEmployeeId,
         firstName,
-        middleName:   middleName   || null,
+        middleName: middleName || null,
         lastName,
         email,
-        salary:       salary       || 0,
+        salary,
         username,
         password,
-        branchId:     101,
-        jobId:        resolvedJobId,
-        depId:        depId        || 10,
+        jobId: JOB_ID,
+        depId: departmentId,
         supervisorId: supervisorId || null
       }
     );
 
-    // 4. Insert phone numbers if provided
+    // 6. Insert phones
     if (phones && phones.length > 0) {
       for (const phone of phones) {
         if (phone && String(phone).trim() !== '') {
           await connection.execute(
-            `INSERT INTO employee_phone (employee_id, employee_phone)
-             VALUES (:empId, :phone)`,
+            `INSERT INTO employee_phone (employee_id, employee_phone) VALUES (:empId, :phone)`,
             { empId: newEmployeeId, phone: String(phone).trim() }
           );
         }
@@ -1378,29 +1689,83 @@ app.post("/staff", async (req, res) => {
   }
 });
 
-// UPDATE STAFF MEMBER
+// ==========================================
+// UPDATE STAFF MEMBER (With Salary Check)
+// ==========================================
 app.put("/staff/:employeeId", async (req, res) => {
   const { employeeId } = req.params;
-  const { firstName, lastName, email, role } = req.body;
+  const { firstName, lastName, email, role, salary, password, phones, depId } = req.body;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    await connection.execute(
-      `UPDATE employees e
-       SET e.first_name = :firstName,
-           e.last_name  = :lastName,
-           e.email      = :email,
-           e.job_id     = (SELECT job_id FROM jobs WHERE job_title = :role)
-       WHERE e.employee_id = :employeeId`,
-      { firstName, lastName, email, role, employeeId },
-      { autoCommit: true }
+    // 1. Fetch salary constraints for the (possibly new) role
+    const jobResult = await connection.execute(
+      `SELECT job_id, min_salary, max_salary FROM jobs WHERE job_title = :role`,
+      { role },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    res.json({ success: true, message: "Staff updated" });
+    if (jobResult.rows.length === 0) {
+      return res.status(400).json({ message: `Role "${role}" not found in Jobs table.` });
+    }
+
+    const { JOB_ID, MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+
+    // 2. Validate salary against range
+    if (salary < MIN_SALARY || salary > MAX_SALARY) {
+      return res.status(400).json({ 
+        message: `Salary violation: For a ${role}, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
+      });
+    }
+
+    // 3. Build update SQL dynamically to include dep_id if provided
+    let updateSql;
+    let params;
+
+    if (depId !== undefined && depId !== null && depId !== '') {
+      // Include dep_id in the update
+      if (password && String(password).trim() !== '') {
+        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.dep_id = :depId, e.password = :password WHERE e.employee_id = :employeeId`;
+        params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), password, employeeId };
+      } else {
+        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.dep_id = :depId WHERE e.employee_id = :employeeId`;
+        params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), employeeId };
+      }
+    } else {
+      // No department change
+      if (password && String(password).trim() !== '') {
+        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.password = :password WHERE e.employee_id = :employeeId`;
+        params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId };
+        params.password = password;
+      } else {
+        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary WHERE e.employee_id = :employeeId`;
+        params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId };
+      }
+    }
+
+    await connection.execute(updateSql, params, { autoCommit: false });
+
+    // 4. Update phones
+    if (phones && Array.isArray(phones)) {
+      await connection.execute(`DELETE FROM employee_phone WHERE employee_id = :empId`, { empId: employeeId });
+      for (const phone of phones) {
+        if (phone && String(phone).trim() !== '') {
+          await connection.execute(
+            `INSERT INTO employee_phone (employee_id, employee_phone) VALUES (:empId, :phone)`,
+            { empId: employeeId, phone: String(phone).trim() }
+          );
+        }
+      }
+    }
+
+    await connection.commit();
+    res.json({ success: true, message: "Staff information updated successfully." });
+
   } catch (err) {
-    console.error(err);
+    console.error("Update error:", err);
+    if (connection) await connection.rollback();
     res.status(500).json({ message: err.message });
   } finally {
     if (connection) await connection.close();
@@ -1430,6 +1795,179 @@ app.delete("/staff/:employeeId", async (req, res) => {
   }
 });
 
+// GET STAFF PHONE NUMBERS
+app.get("/staff/:employeeId/phones", async (req, res) => {
+  const { employeeId } = req.params;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `SELECT employee_phone FROM employee_phone WHERE employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    const phones = result.rows.map(row => String(row.EMPLOYEE_PHONE));
+    res.json(phones);
+  } catch (err) {
+    console.error(err);
+    res.json([]);
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// GET STAFF DETAILS (with department name)
+app.get("/staff/:employeeId/details", async (req, res) => {
+  const { employeeId } = req.params;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `SELECT e.employee_id, e.first_name, e.middle_name, e.last_name, e.email, e.salary, e.hire_date, e.username, e.branch_id, e.dep_id, e.supervisor_id,
+              j.job_title, j.job_id,
+              d.dep_name
+       FROM employees e
+       JOIN jobs j ON e.job_id = j.job_id
+       LEFT JOIN department d ON e.dep_id = d.dep_id
+       WHERE e.employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    const staffData = result.rows[0];
+
+    // Fetch phones
+    const phoneResult = await connection.execute(
+      `SELECT employee_phone FROM employee_phone WHERE employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const phones = phoneResult.rows.map(row => String(row.EMPLOYEE_PHONE));
+    staffData.PHONES = phones;
+    staffData.PHONE = phones.length > 0 ? phones[0] : null;
+
+    // Fetch supervisor name
+    if (staffData.SUPERVISOR_ID) {
+      const supResult = await connection.execute(
+        `SELECT first_name, last_name FROM employees WHERE employee_id = :supId`,
+        { supId: staffData.SUPERVISOR_ID },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (supResult.rows.length > 0) {
+        staffData.SUPERVISOR_NAME = supResult.rows[0].FIRST_NAME + ' ' + supResult.rows[0].LAST_NAME;
+      }
+    }
+
+    res.json(staffData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// GET STAFF DEPENDANTS
+app.get("/staff/:employeeId/dependants", async (req, res) => {
+  const { employeeId } = req.params;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `SELECT national_id, first_name, middle_name, last_name, relationship
+       FROM dependants
+       WHERE employee_id = :empId
+       ORDER BY first_name`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// ADD STAFF DEPENDANT
+app.post("/staff/:employeeId/dependants", async (req, res) => {
+  const { employeeId } = req.params;
+  const { nationalId, firstName, middleName, lastName, relationship } = req.body;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // Check if dependant count is already 4
+    const countResult = await connection.execute(
+      `SELECT COUNT(*) AS cnt FROM dependants WHERE employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (countResult.rows[0].CNT >= 4) {
+      return res.status(400).json({ success: false, message: "Maximum of 4 dependants allowed." });
+    }
+
+    await connection.execute(
+      `INSERT INTO dependants (employee_id, national_id, first_name, middle_name, last_name, relationship)
+       VALUES (:empId, :nationalId, :firstName, :middleName, :lastName, :relationship)`,
+      {
+        empId: employeeId,
+        nationalId: nationalId,
+        firstName: firstName,
+        middleName: middleName || null,
+        lastName: lastName,
+        relationship: relationship
+      },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true, message: "Dependant added successfully." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// DELETE STAFF DEPENDANT
+app.delete("/staff/:employeeId/dependants/:nationalId", async (req, res) => {
+  const { employeeId, nationalId } = req.params;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    await connection.execute(
+      `DELETE FROM dependants WHERE employee_id = :empId AND national_id = :nationalId`,
+      { empId: employeeId, nationalId: nationalId },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true, message: "Dependant removed successfully." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 app.get("/staff/customer/:id", async (req, res) => {
   const customerId = req.params.id;
   let connection;
@@ -1438,6 +1976,7 @@ app.get("/staff/customer/:id", async (req, res) => {
     connection = await oracledb.getConnection(dbConfig);
 
     // CUSTOMER INFO
+    // CUSTOMER INFO (without phone - fetch separately)
     const customerResult = await connection.execute(
       `
       SELECT
@@ -1448,15 +1987,26 @@ app.get("/staff/customer/:id", async (req, res) => {
         c.street,
         c.city,
         c.governorate,
-        cp.customer_phone
+        c.dob
       FROM customer c
-      LEFT JOIN customer_phone cp
-        ON c.customer_id = cp.customer_id
       WHERE c.customer_id = :id
       `,
       { id: customerId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
+
+    // Fetch phone numbers separately
+    const phoneResult = await connection.execute(
+      `SELECT customer_phone FROM customer_phone WHERE customer_id = :id`,
+      { id: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (customerResult.rows.length > 0) {
+      const phones = phoneResult.rows.map(row => String(row.CUSTOMER_PHONE));
+      customerResult.rows[0].CUSTOMER_PHONE = phones.length > 0 ? phones[0] : null;
+      customerResult.rows[0].PHONES = phones;
+    }
 
     // CUSTOMER ACCOUNTS
     const accountsResult = await connection.execute(
@@ -1663,15 +2213,39 @@ app.post("/staff/customer/:id/accounts", async (req, res) => {
 
   try {
     connection = await oracledb.getConnection(dbConfig);
-    
-    // 1. Generate new account number
+
+    // 1. Fetch customer DOB to check age
+    const customerCheck = await connection.execute(
+      `SELECT dob FROM customer WHERE customer_id = :cid`,
+      { cid: customerId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (customerCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    const dob = customerCheck.rows[0].DOB;
+    const age = calculateAge(dob);
+
+    // 2. Age validation: Must be 16+
+    if (age < 16) {
+      return res.status(400).json({ message: "Customer must be at least 16 years old to create an account." });
+    }
+
+    // 3. Account type validation: Under 18 can only have Student accounts
+    if (age < 18 && accountType !== 'Student') {
+      return res.status(400).json({ message: "Customers under 18 can only create Student accounts." });
+    }
+
+    // 4. Generate new account number
     const maxResult = await connection.execute(
       `SELECT NVL(MAX(account_number), 100000000000) + 1 AS next_num FROM account`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     const newAccountNumber = maxResult.rows[0].NEXT_NUM;
 
-    // 2. Create the account
+    // 5. Create the account
     await connection.execute(
       `INSERT INTO account (account_number, account_type, balance, status, branch_id)
        VALUES (:accountNumber, :accountType, :balance, 'Active', :branchId)`,
@@ -1683,7 +2257,7 @@ app.post("/staff/customer/:id/accounts", async (req, res) => {
       }
     );
 
-    // 3. Link account to the customer
+    // 6. Link account to the customer
     await connection.execute(
       `INSERT INTO customer_account (customer_id, account_number)
        VALUES (:customerId, :accountNumber)`,
@@ -1829,6 +2403,12 @@ app.post("/staff/customers", async (req, res) => {
   try {
     connection = await oracledb.getConnection(dbConfig);
 
+    // --- RULE: MUST BE 16 OR OLDER TO BE A CUSTOMER ---
+    const age = calculateAge(customerData.dob);
+    if (age < 16) {
+      return res.status(400).json({ message: "Registration Denied: Customer must be at least 16 years old." });
+    }
+
     // 1. Generate a new sequential Customer ID
     const maxCustResult = await connection.execute(
       `SELECT NVL(MAX(customer_id), 1000) + 1 AS next_id FROM customer`,
@@ -1863,13 +2443,17 @@ app.post("/staff/customers", async (req, res) => {
       }
     );
 
-    // 3. Insert into CUSTOMER_PHONE table if they provided a phone number
-    if (customerData.phone && customerData.phone.trim() !== "") {
-      await connection.execute(
-        `INSERT INTO customer_phone (customer_id, customer_phone)
-         VALUES (:customerId, :phone)`,
-        { customerId: newCustomerId, phone: customerData.phone }
-      );
+    // 3. Insert into CUSTOMER_PHONE table if they provided phone numbers
+    if (customerData.phones && Array.isArray(customerData.phones)) {
+      for (const phone of customerData.phones) {
+        if (phone && String(phone).trim() !== '') {
+          await connection.execute(
+            `INSERT INTO customer_phone (customer_id, customer_phone)
+             VALUES (:customerId, :phone)`,
+            { customerId: newCustomerId, phone: String(phone).trim() }
+          );
+        }
+      }
     }
 
     // 4. Save all changes permanently

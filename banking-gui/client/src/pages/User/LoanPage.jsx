@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function LoanPage() {
@@ -14,6 +15,7 @@ export default function LoanPage() {
   const [userAccounts, setUserAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentError, setPaymentError] = useState('');
   
   const [loans, setLoans] = useState([]);
   const [selectedLoanId, setSelectedLoanId] = useState('');
@@ -87,26 +89,42 @@ useEffect(() => {
   const estimatedMonthly = ((loanAmount * 1.05) / loanTerm).toFixed(2);
 
   const handleApply = async () => {
-    const response = await fetch('http://localhost:3000/loans/apply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customerId: user.CUSTOMER_ID,
-        amount: loanAmount,
-        term: loanTerm,
-        interestRate: 5.0
-      })
-    });
-    if (response.ok) {
-      alert("Application Submitted!");
-      window.location.reload();
+    try {
+      const response = await fetch('http://localhost:3000/loans/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: user.CUSTOMER_ID,
+          amount: loanAmount,
+          term: loanTerm,
+          interestRate: 5.0
+        })
+      });
+      const result = await response.json();
+      if (response.ok) {
+        alert("Application Submitted!");
+        window.location.reload();
+      } else {
+        alert("Application failed: " + (result.message || "Unknown error. Please contact support."));
+      }
+    } catch (error) {
+      alert("Could not connect to the server. Please ensure the backend is running.");
     }
   };
 
   const handlePayment = async () => {
     if (!activeLoan) return alert("System Error: No active loan found.");
     if (!selectedAccount) return alert("Please select an account to pay from.");
-    if (!paymentAmount || Number(paymentAmount) <= 0) return alert("Please enter a valid payment amount greater than 0.");
+    
+    if (!paymentAmount || Number(paymentAmount) <= 0) {
+      setPaymentError('Please enter a valid payment amount greater than 0.');
+      return;
+    }
+    if (Number(paymentAmount) > remainingBalance) {
+      setPaymentError(`Payment cannot exceed the remaining balance of $${remainingBalance.toFixed(2)}.`);
+      return;
+    }
+    setPaymentError('');
 
     try {
       const response = await fetch('http://localhost:3000/loans/pay', {
@@ -370,9 +388,21 @@ useEffect(() => {
                 <input 
                   type="number" placeholder="0.00"
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  className="w-full p-3 rounded-xl border-2 border-gray-100 focus:border-[#004a99] outline-none font-black text-xl"
+                  onChange={(e) => {
+                    setPaymentAmount(e.target.value);
+                    if (paymentError) setPaymentError('');
+                  }}
+                  className={`w-full p-3 rounded-xl border-2 outline-none font-black text-xl ${
+                    paymentError
+                      ? 'border-red-300 bg-red-50 focus:border-red-500'
+                      : 'border-gray-100 focus:border-[#004a99]'
+                  }`}
                 />
+                {paymentError && (
+                  <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                    <AlertCircle size={12} /> {paymentError}
+                  </p>
+                )}
               </div>
               <div className="flex gap-3 pt-4">
                 <button onClick={() => setIsPaymentModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-50 rounded-xl">Cancel</button>

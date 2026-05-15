@@ -3,8 +3,9 @@ import axios from 'axios'
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, UserPlus, ClipboardCheck, ShieldCheck, 
-  Search, History, Activity, LogOut // Replaced Snowflake with History
+  Search, History, Activity, LogOut
 } from 'lucide-react';
+import { stripJobPrefix } from '../../utils/jobMappings.js';
 import euiLogo from '../../assets/eui-logo.png';
 
 export default function AdminDashboard() {
@@ -19,7 +20,7 @@ const [stats, setStats] = useState({
 const [activities, setActivities] = useState([]);
 
 const staff = JSON.parse(localStorage.getItem("staff"));
-const isManager = staff?.JOB_ID === 1;
+const isManager = staff?.JOB_ID === 1 || staff?.JOB_ID === 3 || staff?.JOB_ID === 4;
 
 useEffect(() => {
 
@@ -70,7 +71,11 @@ const fetchDashboardData = async () => {
         <div className="flex items-center gap-6">
           <div className="text-right">
             <p className="text-sm font-bold text-gray-700"> {staff?.FIRST_NAME} {staff?.LAST_NAME}</p>
-            <p className="text-xs text-gray-400 capitalize">{isManager ? 'Manager' : 'Teller'} Access</p>
+            <p className="text-xs text-gray-400 capitalize">
+              {isManager 
+                ? (staff?.JOB_ID === 3 ? 'Administrator' : 'Manager') 
+                : (staff?.JOB_TITLE ? stripJobPrefix(staff.JOB_TITLE) : 'Staff')} Access
+            </p>
           </div>
           <button 
             onClick={() => navigate('/', { replace: true })}
@@ -157,16 +162,14 @@ const fetchDashboardData = async () => {
             bg="bg-amber-50" 
           />
 
-          {/* MANAGER ONLY: STAFF MANAGEMENT */}
-          {isManager && (
-            <ToolCard 
-              onClick={() => navigate('/staff-directory')}
-              icon={<ShieldCheck size={28} />} 
-              label="Staff Management" 
-              color="text-indigo-600" 
-              bg="bg-indigo-50" 
-            />
-          )}
+          {/* STAFF MANAGEMENT — visible to all staff; tellers get access-denied on the page */}
+          <ToolCard 
+            onClick={() => navigate('/staff-directory')}
+            icon={<ShieldCheck size={28} />} 
+            label="Staff Management" 
+            color="text-indigo-600" 
+            bg="bg-indigo-50" 
+          />
         </div>
 
         {/* RECENT ACTION LOGS (SYSTEM AUDIT) */}

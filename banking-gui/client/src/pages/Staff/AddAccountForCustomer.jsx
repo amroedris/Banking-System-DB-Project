@@ -1,22 +1,69 @@
-import React, { useState } from 'react';
-import { X, Landmark, Save, AlertCircle } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, Landmark, Save, AlertCircle, Info } from 'lucide-react';
 import axios from 'axios';
+import { validateNonNegative, validateAmount } from '../../utils/validation.js';
 
-export default function AddAccountForCustomer({ customerId, customerName, onClose, onSuccess }) {
+export default function AddAccountForCustomer({ customerId, customerName, customerDob, onClose, onSuccess }) {
+
+  // Calculate customer age
+  const { age, isUnder18, isUnder16 } = useMemo(() => {
+    if (!customerDob) return { age: null, isUnder18: false, isUnder16: false };
+    const dob = new Date(customerDob);
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const m = today.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+      age--;
+    }
+    return { age, isUnder18: age < 18, isUnder16: age < 16 };
+  }, [customerDob]);
+
   const [formData, setFormData] = useState({
-    accountType: 'Savings',
+    accountType: isUnder18 ? 'Student' : 'Savings',
     initialDeposit: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [depositError, setDepositError] = useState('');
+
+  if (isUnder16) {
+    return (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+        <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-md" onClick={onClose} />
+        <div className="relative bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden">
+          <div className="bg-red-50 p-8 text-center">
+            <AlertCircle size={48} className="mx-auto text-red-500 mb-4" />
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Account Creation Restricted</h2>
+            <p className="text-gray-600 mb-4">
+              Customers must be at least 16 years old to create a bank account.
+            </p>
+            <p className="text-sm text-gray-500 mb-6">Customer age: {age} years</p>
+            <button
+              onClick={onClose}
+              className="px-8 py-3 bg-red-500 text-white rounded-2xl font-bold hover:bg-red-600 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate deposit amount
+    const depositErr = formData.initialDeposit !== ''
+      ? validateNonNegative(formData.initialDeposit, 'Initial deposit')
+      : '';
+    setDepositError(depositErr);
+    if (depositErr) return;
+
     setIsSubmitting(true);
     setError('');
 
     try {
-      // 1. UPDATED URL to hit the exact route we made in index.js
       const response = await axios.post(`http://localhost:3000/staff/customer/${customerId}/accounts`, {
         accountType: formData.accountType,
         initialDeposit: Number(formData.initialDeposit) || 0
@@ -37,7 +84,7 @@ export default function AddAccountForCustomer({ customerId, customerName, onClos
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
-      
+
       <div className="relative bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
         {/* Header */}
         <div className="bg-[#004a99] p-8 text-white">
@@ -60,6 +107,16 @@ export default function AddAccountForCustomer({ customerId, customerName, onClos
             </div>
           )}
 
+          {isUnder18 && (
+            <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl text-amber-800 text-xs font-semibold flex items-start gap-2">
+              <Info size={16} className="flex-shrink-0 mt-0.5" />
+              <div>
+                <p>Customer age: {age} years</p>
+                <p>Only Student accounts are available for customers under 18.</p>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
               <Landmark size={14} className="text-[#a37e2c]" /> Account Type
@@ -68,13 +125,18 @@ export default function AddAccountForCustomer({ customerId, customerName, onClos
               className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] font-medium"
               value={formData.accountType}
               onChange={(e) => setFormData({...formData, accountType: e.target.value})}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUnder18}
             >
-              <option value="Savings">Savings</option>
-              <option value="Retail">Retail</option>
-              <option value="Corporate">Corporate</option>
-              <option value="Student">Student</option>
-              <option value="Joint">Joint</option>
+              {isUnder18 ? (
+                <option value="Student">Student Account</option>
+              ) : (
+                <>
+                  <option value="Savings">Savings Account</option>
+                  <option value="Retail">Retail Account</option>
+                  <option value="Corporate">Corporate Account</option>
+                  <option value="Joint">Joint Account</option>
+                </>
+              )}
             </select>
           </div>
 
@@ -87,11 +149,23 @@ export default function AddAccountForCustomer({ customerId, customerName, onClos
               min="0"
               step="0.01"
               placeholder="0.00"
-              className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] font-medium"
+              className={`w-full px-6 py-4 rounded-2xl outline-none focus:ring-2 font-medium ${
+                depositError
+                  ? 'bg-red-50 border border-red-300 focus:ring-red-400'
+                  : 'bg-gray-50 border border-gray-200 focus:ring-[#004a99]'
+              }`}
               value={formData.initialDeposit}
-              onChange={(e) => setFormData({...formData, initialDeposit: e.target.value})}
+              onChange={(e) => {
+                setFormData({...formData, initialDeposit: e.target.value});
+                if (depositError) setDepositError('');
+              }}
               disabled={isSubmitting}
             />
+            {depositError && (
+              <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                <AlertCircle size={12} /> {depositError}
+              </p>
+            )}
           </div>
 
           <div className="pt-4">

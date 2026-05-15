@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, CreditCard, Save, AlertCircle } from 'lucide-react';
 import axios from 'axios';
+import { validateCreditLimit } from '../../utils/validation.js';
 
 export default function AddCardModal({ accountNumber, onClose, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -9,17 +10,23 @@ export default function AddCardModal({ accountNumber, onClose, onSuccess }) {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [limitError, setLimitError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (formData.cardType === 'Credit') {
+      const err = validateCreditLimit(formData.cardLimit);
+      setLimitError(err);
+      if (err) return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
     try {
-      // 1. Updated URL to match the backend route
       const response = await axios.post(`http://localhost:3000/staff/account/${accountNumber}/cards`, {
         cardType: formData.cardType,
-        // (Optional) We pass cardLimit, though the backend currently ignores it unless you add a limit column later!
         cardLimit: formData.cardType === 'Credit' ? (Number(formData.cardLimit) || 5000) : null
       });
 
@@ -87,11 +94,23 @@ export default function AddCardModal({ accountNumber, onClose, onSuccess }) {
                 min="100"
                 step="100"
                 placeholder="5000"
-                className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] font-medium"
+                className={`w-full px-6 py-4 rounded-2xl outline-none focus:ring-2 font-medium ${
+                  limitError
+                    ? 'bg-red-50 border border-red-300 focus:ring-red-400'
+                    : 'bg-gray-50 border border-gray-200 focus:ring-[#004a99]'
+                }`}
                 value={formData.cardLimit}
-                onChange={(e) => setFormData({...formData, cardLimit: e.target.value})}
+                onChange={(e) => {
+                  setFormData({...formData, cardLimit: e.target.value});
+                  if (limitError) setLimitError('');
+                }}
                 disabled={isSubmitting}
               />
+              {limitError && (
+                <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                  <AlertCircle size={12} /> {limitError}
+                </p>
+              )}
             </div>
           )}
 

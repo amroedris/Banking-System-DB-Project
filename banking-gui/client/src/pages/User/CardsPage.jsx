@@ -179,7 +179,7 @@ export default function CardsPage() {
               onChange={(e) => setSelectedAccountId(e.target.value)}
               className="bg-transparent font-bold text-gray-700 focus:outline-none cursor-pointer"
             >
-              {accounts.filter(account => account.STATUS !== 'Closed').map((account) => (
+              {accounts.filter(acc => acc.STATUS !== 'Closed').map((acc) => (
                 <option key={acc.ACCOUNT_NUMBER} value={acc.ACCOUNT_NUMBER}>
                   {acc.ACCOUNT_TYPE} (***{String(acc.ACCOUNT_NUMBER).slice(-4)})
                 </option>

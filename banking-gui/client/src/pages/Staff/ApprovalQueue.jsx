@@ -8,7 +8,7 @@ export default function ApprovalQueue() {
   const navigate = useNavigate();
   
   const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
-  const isManager = staffData.JOB_ID === 1;
+  const isManager = staffData.JOB_ID === 1 || staffData.JOB_ID === 3 || staffData.JOB_ID === 4;
 
   if (!isManager) {
     return (
@@ -34,6 +34,8 @@ export default function ApprovalQueue() {
 
   const [requests, setRequests] = useState([]);
   const [totalToday, setTotalToday] = useState(0);
+  const totalLoans = requests.filter(req => req.REQUEST_TYPE === 'loan').length;
+  const totalCards = requests.filter(req => req.REQUEST_TYPE === 'card').length;
   
 const handleAction = async (id, action, type) => {
   try {
@@ -88,8 +90,8 @@ const handleAction = async (id, action, type) => {
         
         {/* SUMMARY SECTION - 2 columns */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <StatCard title="Total Pending" value={requests.length} color="blue" />
-          <StatCard title="Total Today" value={totalToday} color="blue" />
+          <StatCard title="Pending Loans" value={totalLoans} color="blue" />
+          <StatCard title="Pending Cards" value={totalCards} color="blue" />
         </div>
 
         {/* REQUEST LIST */}
