@@ -92,7 +92,7 @@ CREATE TABLE Card (
     Card_Type VARCHAR2(20) NOT NULL CHECK (Card_Type IN ('Debit', 'Credit', 'Prepaid')),
     Expiry_Date DATE NOT NULL,
     Issue_Date DATE NOT NULL,
-    Card_Status VARCHAR2(20) NOT NULL CHECK (Card_Status IN ('Active', 'Expired', 'Blocked', 'Suspended')),
+    Card_Status VARCHAR2(20) NOT NULL CHECK (Card_Status IN ('Active', 'Expired', 'Blocked', 'Suspended', 'Pending')),
     Card_Limit NUMBER(15, 2),
     Card_Number CHAR(16) UNIQUE NOT NULL,
     CVV CHAR(3) NOT NULL,

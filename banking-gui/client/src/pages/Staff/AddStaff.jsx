@@ -35,13 +35,16 @@ export default function AddStaff() {
     );
   }
 
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    role: 'Teller',
-    salary: ''
-  });
+const [formData, setFormData] = useState({
+  firstName: '',
+  lastName: '',
+  email: '',
+  role: 'Teller',
+  salary: '',
+  username: '',
+  tempPassword: '',
+  phones: ['']
+});
 
   const [isSuccess, setIsSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,14 +56,17 @@ export default function AddStaff() {
     setError('');      try {
       const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
       
-      await axios.post('http://localhost:3000/staff', {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
-        role: formData.role,
-        salary: Number(formData.salary) || 5000,
-        supervisorId: staffData.EMPLOYEE_ID || null
-      });
+await axios.post('http://localhost:3000/staff', {
+  firstName:    formData.firstName,
+  lastName:     formData.lastName,
+  email:        formData.email,
+  role:         formData.role,
+  salary:       Number(formData.salary) || 5000,
+  username:     formData.username,
+  password:     formData.tempPassword,
+  phones:       formData.phones,             // ← add this
+  supervisorId: staffData.EMPLOYEE_ID || null
+});
 
       setIsSuccess(true);
       setTimeout(() => {
@@ -73,6 +79,23 @@ export default function AddStaff() {
       setIsSubmitting(false);
     }
   };
+
+const addPhone = () => {
+  if (formData.phones.length < 3) {
+    setFormData({ ...formData, phones: [...formData.phones, ''] });
+  }
+};
+
+const removePhone = (index) => {
+  const updated = formData.phones.filter((_, i) => i !== index);
+  setFormData({ ...formData, phones: updated });
+};
+
+const updatePhone = (index, value) => {
+  const updated = [...formData.phones];
+  updated[index] = value;
+  setFormData({ ...formData, phones: updated });
+};
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans pb-12">
@@ -169,16 +192,15 @@ export default function AddStaff() {
                   <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
                     <Briefcase size={14} className="text-[#a37e2c]" /> System Role
                   </label>
-                  <select 
-                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] appearance-none font-medium"
-                    value={formData.role}
-                    onChange={(e) => setFormData({...formData, role: e.target.value})}
-                    disabled={isSubmitting}
-                  >
-                    <option value="Teller">Teller</option>
-                    <option value="Analyst">Analyst</option>
-                    <option value="Manager">Manager</option>
-                  </select>
+<select
+  value={formData.role}
+  onChange={(e) => setFormData({...formData, role: e.target.value})}
+  className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] appearance-none font-medium"
+  disabled={isSubmitting}
+>
+  <option value="Teller">Teller</option>
+  <option value="Branch Manager">Branch Manager</option>
+</select>
                 </div>
 
                 <div className="space-y-2">
@@ -194,6 +216,75 @@ export default function AddStaff() {
                   />
                 </div>
               </div>
+
+              <div className="space-y-2">
+   <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+     <ShieldCheck size={14} className="text-[#a37e2c]" /> Username
+   </label>
+   <input
+     required
+     type="text"
+     placeholder="ahmed.kamal"
+     className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
+     value={formData.username}
+     onChange={(e) => setFormData({...formData, username: e.target.value})}
+     disabled={isSubmitting}
+   />
+ </div>
+
+ <div className="space-y-2">
+   <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+     <Lock size={14} className="text-[#a37e2c]" /> Temporary Password
+   </label>
+   <input
+     required
+     type="text"
+     placeholder="e.g. EUI@2025"
+     className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
+     value={formData.tempPassword}
+     onChange={(e) => setFormData({...formData, tempPassword: e.target.value})}
+     disabled={isSubmitting}
+   />
+ </div>
+
+ <div className="space-y-3">
+  <div className="flex items-center justify-between">
+    <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+      <Mail size={14} className="text-[#a37e2c]" /> Phone Numbers
+    </label>
+    {formData.phones.length < 3 && (
+      <button
+        type="button"
+        onClick={addPhone}
+        className="text-xs text-[#004a99] font-bold hover:underline"
+      >
+        + Add another
+      </button>
+    )}
+  </div>
+
+  {formData.phones.map((phone, index) => (
+    <div key={index} className="flex gap-2 items-center">
+      <input
+        type="tel"
+        placeholder={`Phone ${index + 1}`}
+        className="flex-1 px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
+        value={phone}
+        onChange={(e) => updatePhone(index, e.target.value)}
+        disabled={isSubmitting}
+      />
+      {formData.phones.length > 1 && (
+        <button
+          type="button"
+          onClick={() => removePhone(index)}
+          className="p-3 bg-red-50 text-red-400 rounded-xl hover:bg-red-100 transition-all"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  ))}
+</div>
 
               <div className="pt-6">
                 <button 

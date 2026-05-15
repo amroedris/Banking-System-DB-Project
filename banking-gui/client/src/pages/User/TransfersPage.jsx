@@ -21,22 +21,25 @@ export default function TransferPage() {
       return;
     }
 
-    axios.get(`http://localhost:3000/accounts/${storedUser.CUSTOMER_ID}`)
-      .then((response) => {
-        setAccounts(response.data);
-        if (response.data.length > 0) {
-          setFromAccount(response.data[0].ACCOUNT_NUMBER);
-          if (response.data.length > 1) {
-            setToAccount(response.data[1].ACCOUNT_NUMBER);
-          }
-        }
-      })
-      .catch((err) => console.error(err));
+ axios.get(`http://localhost:3000/accounts/${storedUser.CUSTOMER_ID}`)
+  .then((response) => {
+    const activeAccounts = response.data.filter(acc => acc.STATUS !== 'Closed');
+    setAccounts(activeAccounts);
+    if (activeAccounts.length > 0) {
+      setFromAccount(activeAccounts[0].ACCOUNT_NUMBER);
+      if (activeAccounts.length > 1) {
+        setToAccount(activeAccounts[1].ACCOUNT_NUMBER);
+      }
+    }
+  })
+  .catch((err) => console.error(err));
   }, [navigate]);
 
   const selectedFromAccount = accounts.find(
     acc => String(acc.ACCOUNT_NUMBER) === String(fromAccount)
   );
+
+  const isFromAccountRestricted = selectedFromAccount?.STATUS !== 'Active';
 
   const handleTransfer = async (e) => {
     e.preventDefault();
@@ -135,28 +138,37 @@ export default function TransferPage() {
 
           <form onSubmit={handleTransfer} className="space-y-6">
 
-            {/* From Account */}
-            <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200">
-              <label className="block text-sm font-bold text-gray-700 uppercase tracking-wider mb-3">
-                From Account
-              </label>
-              <select
-                value={fromAccount}
-                onChange={(e) => setFromAccount(e.target.value)}
-                className="w-full bg-white border border-gray-300 p-3.5 rounded-xl font-semibold appearance-none focus:outline-none focus:ring-2 focus:ring-[#004a99]"
-              >
-                {accounts.map(acc => (
-                  <option key={acc.ACCOUNT_NUMBER} value={acc.ACCOUNT_NUMBER}>
-                    {acc.ACCOUNT_TYPE} (•••• {String(acc.ACCOUNT_NUMBER).slice(-4)})
-                  </option>
-                ))}
-              </select>
-              <div className="mt-3 flex justify-between text-sm">
-                <span className="text-gray-500">Available Balance:</span>
-                <span className="font-bold text-[#004a99]">
-                  ${Number(selectedFromAccount?.BALANCE || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </span>
-              </div>
+         {/* From Account */}
+<div className={`p-6 rounded-2xl border transition-all ${isFromAccountRestricted ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+  <label className="block text-sm font-bold text-gray-700 uppercase tracking-wider mb-3">
+    From Account
+  </label>
+  <select
+    value={fromAccount}
+    onChange={(e) => setFromAccount(e.target.value)}
+    className="w-full bg-white border border-gray-300 p-3.5 rounded-xl font-semibold appearance-none focus:outline-none focus:ring-2 focus:ring-[#004a99]"
+  >
+    {accounts.map(acc => (
+      <option key={acc.ACCOUNT_NUMBER} value={acc.ACCOUNT_NUMBER}>
+        {acc.ACCOUNT_TYPE} (•••• {String(acc.ACCOUNT_NUMBER).slice(-4)}) — {acc.STATUS}
+      </option>
+    ))}
+  </select>
+  <div className="mt-3 flex justify-between text-sm">
+    <span className="text-gray-500">Available Balance:</span>
+    <span className={`font-bold ${isFromAccountRestricted ? 'text-red-600' : 'text-[#004a99]'}`}>
+      ${Number(selectedFromAccount?.BALANCE || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+    </span>
+  </div>
+  {/* NEW: Warning Message */}
+{isFromAccountRestricted && selectedFromAccount && (
+  <div className="mt-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-lg flex items-center gap-2">
+    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+    </svg>
+    <span className="font-bold">This account is inactive. Transfers are disabled.</span>
+  </div>
+)}
             </div>
 
             {/* To Account */}
@@ -233,17 +245,18 @@ export default function TransferPage() {
             </div>
 
             {/* Submit */}
-            <button
-              type="submit"
-              disabled={
-                loading ||
-                !amount ||
-                (transferType === 'internal' && String(fromAccount) === String(toAccount))
-              }
-              className="w-full py-4 bg-[#004a99] text-white text-xl font-black rounded-2xl hover:bg-[#003d7a] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Processing...' : 'Send Money'}
-            </button>
+        <button
+  type="submit"
+  disabled={
+    loading ||
+    !amount ||
+    isFromAccountRestricted || // NEW: Block if account is not active
+    (transferType === 'internal' && String(fromAccount) === String(toAccount))
+  }
+  className="w-full py-4 bg-[#004a99] text-white text-xl font-black rounded-2xl hover:bg-[#003d7a] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  {loading ? 'Processing...' : isFromAccountRestricted ? 'Account Restricted' : 'Send Money'}
+</button>
 
           </form>
         </div>

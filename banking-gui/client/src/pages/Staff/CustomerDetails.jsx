@@ -3,12 +3,12 @@ import axios from 'axios';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mail, Phone, MapPin, 
-  CreditCard, Activity, Snowflake, Plus, Lock, Landmark, Edit2 // <-- Added Edit2 Icon
+  CreditCard, Activity, Snowflake, Plus, Lock, Landmark, Edit2, Trash2
 } from 'lucide-react';
 import euiLogo from '../../assets/eui-logo.png';
 import AddCardModal from './AddCardModal';
 import AddAccountForCustomer from './AddAccountForCustomer'; 
-import EditLimitModal from './EditLimitModal'; // <-- IMPORT NEW MODAL
+import EditLimitModal from './EditLimitModal';
 
 export default function CustomerDetails() {
   const { id } = useParams();
@@ -48,6 +48,16 @@ export default function CustomerDetails() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const closeAccount = async (accountNumber) => {
+    if (!window.confirm("Close this account? This cannot be undone.")) return;
+    try {
+      await axios.put(`http://localhost:3000/staff/account/${accountNumber}/close`);
+      await fetchDetails();
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to close account.");
     }
   };
 
@@ -125,101 +135,107 @@ export default function CustomerDetails() {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {accounts.length > 0 ? accounts.map((acc) => {
-                const accountCards = cards.filter(c => c.ACCOUNT_NUMBER === acc.ACCOUNT_NUMBER);
+              {(() => {
+                const openAccounts = accounts.filter(acc => acc.STATUS !== 'Closed');
 
-                return (
-                  <div key={acc.ACCOUNT_NUMBER} className="p-5 border border-gray-100 rounded-2xl bg-gray-50/50 flex flex-col justify-between group hover:border-blue-100 transition-all">
-                    
-                    <div>
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{acc.ACCOUNT_TYPE}</p>
-                          <p className="font-mono text-sm font-semibold text-gray-600 mt-1">{acc.ACCOUNT_NUMBER}</p>
+                if (openAccounts.length === 0) return (
+                  <p className="text-gray-400 text-sm">No accounts found.</p>
+                );
+
+                return openAccounts.map((acc) => {
+                  const accountCards = cards.filter(c => c.ACCOUNT_NUMBER === acc.ACCOUNT_NUMBER);
+
+                  return (
+                    <div key={acc.ACCOUNT_NUMBER} className="p-5 border border-gray-100 rounded-2xl bg-gray-50/50 flex flex-col justify-between group hover:border-blue-100 transition-all">
+                      <div>
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{acc.ACCOUNT_TYPE}</p>
+                            <p className="font-mono text-sm font-semibold text-gray-600 mt-1">{acc.ACCOUNT_NUMBER}</p>
+                          </div>
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${acc.STATUS === 'Active' ? 'bg-emerald-100 text-emerald-700' : acc.STATUS === 'Closed' ? 'bg-gray-200 text-gray-600' : 'bg-red-100 text-red-700'}`}>
+                            {acc.STATUS}
+                          </span>
                         </div>
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${acc.STATUS === 'Active' ? 'bg-emerald-100 text-emerald-700' : acc.STATUS === 'Closed' ? 'bg-gray-200 text-gray-600' : 'bg-red-100 text-red-700'}`}>
-                          {acc.STATUS}
-                        </span>
-                      </div>
-                      
-                      <div className="flex justify-between items-end mb-4">
-                        <p className="text-2xl font-black text-gray-800">${Number(acc.BALANCE).toLocaleString()}</p>
-                        <button 
-                          onClick={() => toggleAccountFreeze(acc.ACCOUNT_NUMBER, acc.STATUS)}
-                          disabled={acc.STATUS === 'Closed'}
-                          className={`p-2 rounded-lg transition-all ${acc.STATUS === 'Active' ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-100' : acc.STATUS === 'Closed' ? 'text-gray-200 cursor-not-allowed' : 'text-cyan-600 bg-cyan-100 hover:bg-cyan-200'}`}
-                          title={acc.STATUS === 'Active' ? 'Freeze Account' : acc.STATUS === 'Closed' ? 'Closed' : 'Unfreeze Account'}
-                        >
-                          {acc.STATUS === 'Closed' ? <Lock size={18} /> : <Snowflake size={18} />}
-                        </button>
-                      </div>
-                    </div>
+                        
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => toggleAccountFreeze(acc.ACCOUNT_NUMBER, acc.STATUS)}
+                            disabled={acc.STATUS === 'Closed'}
+                            className={`p-2 rounded-lg transition-all ${acc.STATUS === 'Active' ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-100' : acc.STATUS === 'Closed' ? 'text-gray-200 cursor-not-allowed' : 'text-cyan-600 bg-cyan-100 hover:bg-cyan-200'}`}
+                            title={acc.STATUS === 'Active' ? 'Freeze Account' : 'Unfreeze Account'}
+                          >
+                            <Snowflake size={18} />
+                          </button>
 
-                    <div className="pt-4 border-t border-gray-200/60">
-                      <div className="flex justify-between items-center mb-3">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Linked Cards</p>
-                        <button
-                          onClick={() => openIssueCardModal(acc.ACCOUNT_NUMBER)}
-                          disabled={acc.STATUS !== 'Active'}
-                          className="text-[10px] font-bold text-[#004a99] bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          + Issue Card
-                        </button>
+                          <button
+                            onClick={() => closeAccount(acc.ACCOUNT_NUMBER)}
+                            disabled={Number(acc.BALANCE) > 0}
+                            className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={Number(acc.BALANCE) > 0 ? "Clear balance before closing" : "Close Account"}
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </div>
-                      
-                      <div className="space-y-2">
-                        {accountCards.length > 0 ? accountCards.map(card => (
-                          <div key={card.CARD_ID} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
-                            
-                            <div className="flex items-center gap-3">
-                              <div className="bg-gray-50 p-2 rounded-lg text-gray-400">
-                                <CreditCard size={16} />
-                              </div>
-                              <div>
-                                <p className="text-xs font-bold text-gray-700 leading-tight">{card.CARD_TYPE}</p>
-                                
-                                {/* REFACTORED CARD UI */}
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <p className="text-[10px] text-gray-400 font-mono">•••• {String(card.CARD_NUMBER).slice(-4)}</p>
-                                  
-                                  {card.CARD_TYPE === 'Credit' && (
-                                    <div className="flex items-center border border-blue-100 rounded overflow-hidden">
-                                      <span className="bg-blue-50 text-[#004a99] text-[9px] font-bold px-1.5 py-0.5">
-                                        Limit: ${card.CARD_LIMIT}
-                                      </span>
-                                      {card.CARD_STATUS === 'Active' && (
-                                        <button 
-                                          onClick={() => openEditLimitModal(card.CARD_ID, card.CARD_LIMIT)}
-                                          className="bg-white hover:bg-[#004a99] text-[#004a99] hover:text-white px-1.5 py-0.5 transition-colors border-l border-blue-100"
-                                          title="Edit Limit"
-                                        >
-                                          <Edit2 size={10} />
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
+
+                      <div className="pt-4 border-t border-gray-200/60">
+                        <div className="flex justify-between items-center mb-3">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Linked Cards</p>
+                          <button
+                            onClick={() => openIssueCardModal(acc.ACCOUNT_NUMBER)}
+                            disabled={acc.STATUS !== 'Active'}
+                            className="text-[10px] font-bold text-[#004a99] bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            + Issue Card
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          {accountCards.length > 0 ? accountCards.map(card => (
+                            <div key={card.CARD_ID} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                              <div className="flex items-center gap-3">
+                                <div className="bg-gray-50 p-2 rounded-lg text-gray-400">
+                                  <CreditCard size={16} />
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-gray-700 leading-tight">{card.CARD_TYPE}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <p className="text-[10px] text-gray-400 font-mono">•••• {String(card.CARD_NUMBER).slice(-4)}</p>
+                                    {card.CARD_TYPE === 'Credit' && (
+                                      <div className="flex items-center border border-blue-100 rounded overflow-hidden">
+                                        <span className="bg-blue-50 text-[#004a99] text-[9px] font-bold px-1.5 py-0.5">
+                                          Limit: ${card.CARD_LIMIT}
+                                        </span>
+                                        {card.CARD_STATUS === 'Active' && (
+                                          <button 
+                                            onClick={() => openEditLimitModal(card.CARD_ID, card.CARD_LIMIT)}
+                                            className="bg-white hover:bg-[#004a99] text-[#004a99] hover:text-white px-1.5 py-0.5 transition-colors border-l border-blue-100"
+                                            title="Edit Limit"
+                                          >
+                                            <Edit2 size={10} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
+                              <div className="flex items-center">
+                                <span className={`text-[9px] font-bold uppercase px-2 py-1 rounded-md ${card.CARD_STATUS === 'Active' ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
+                                  {card.CARD_STATUS}
+                                </span>
+                              </div>
                             </div>
-                            
-                            <div className="flex items-center">
-                              <span className={`text-[9px] font-bold uppercase px-2 py-1 rounded-md ${card.CARD_STATUS === 'Active' ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
-                                {card.CARD_STATUS}
-                              </span>
-                            </div>
-
-                          </div>
-                        )) : (
-                          <p className="text-[10px] text-gray-400 italic">No cards issued to this account.</p>
-                        )}
+                          )) : (
+                            <p className="text-[10px] text-gray-400 italic">No cards issued to this account.</p>
+                          )}
+                        </div>
                       </div>
                     </div>
-
-                  </div>
-                );
-              }) : (
-                <p className="text-gray-400 text-sm">No accounts found.</p>
-              )}
+                  );
+                });
+              })()}
             </div>
           </div>
 

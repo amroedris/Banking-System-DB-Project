@@ -331,25 +331,6 @@ export default function EditProfilePage() {
                           />
                         </div>
 
-                        <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                            Phone Number
-                          </label>
-
-                          <input
-                            type="tel"
-                            required
-                            value={personalData.phone}
-                            onChange={(e) =>
-                              setPersonalData({
-                                ...personalData,
-                                phone: e.target.value
-                              })
-                            }
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#004a99] focus:outline-none font-semibold transition-all"
-                          />
-                        </div>
-
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">

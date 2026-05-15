@@ -39,10 +39,9 @@ export default function CustomerDashboard() {
       setAccounts(accountsRes.data);
 
       // CALCULATE TOTAL BALANCE
-      const total = accountsRes.data.reduce(
-        (sum, acc) => sum + Number(acc.BALANCE),
-        0
-      );
+const total = accountsRes.data
+  .filter(acc => acc.STATUS !== 'Closed')
+  .reduce((sum, acc) => sum + Number(acc.BALANCE), 0);
 
       setUserData({
         name: storedUser.FIRST_NAME,
@@ -235,74 +234,47 @@ export default function CustomerDashboard() {
         {/* BOTTOM SECTION */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* ACCOUNTS */}
-          <div className="lg:col-span-2">
+{/* ACCOUNTS */}
+<div className="lg:col-span-2">
 
-            <h2 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
-              <span className="w-2 h-6 bg-[#a37e2c] rounded-full"></span>
-              Your Accounts
-            </h2>
+  <h2 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
+    <span className="w-2 h-6 bg-[#a37e2c] rounded-full"></span>
+    Your Accounts
+  </h2>
 
-            <div className="space-y-4">
+  <div className="space-y-4">
+    {(() => {
+      const activeAccounts = accounts.filter(acc => acc.STATUS !== 'Closed');
 
-              {accounts.length === 0 ? (
+      if (activeAccounts.length === 0) return (
+        <div className="bg-white p-10 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center gap-3">
+          <h3 className="font-bold text-gray-700 text-lg">No Accounts Found</h3>
+        </div>
+      );
 
-                <div className="bg-white p-10 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center gap-3">
-
-                  <h3 className="font-bold text-gray-700 text-lg">
-                    No Accounts Found
-                  </h3>
-
-                </div>
-
-              ) : (
-
-                accounts.map((account) => (
-
-                  <div 
-                    key={account.ACCOUNT_NUMBER} 
-                    onClick={() =>
-                      navigate('/account', {
-                        state: {
-                          accountNumber: account.ACCOUNT_NUMBER
-                        }
-                      })
-                    }
-                    className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 hover:shadow-md transition-all border-l-4 border-l-[#004a99] cursor-pointer group"
-                  >
-
-                    <div>
-
-                      <h3 className="font-bold text-gray-800 text-lg group-hover:text-[#004a99] transition-colors">
-                        {account.ACCOUNT_TYPE}
-                      </h3>
-
-                      <p className="text-gray-400 font-mono text-sm tracking-widest">
-                        •••• {String(account.ACCOUNT_NUMBER).slice(-4)}
-                      </p>
-
-                    </div>
-
-                    <div className="text-left sm:text-right">
-
-                      <p className="text-xs font-bold text-gray-400 uppercase mb-1">
-                        Balance
-                      </p>
-
-                      <p className="text-2xl font-black text-gray-900">
-                        ${Number(account.BALANCE).toLocaleString()}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                ))
-
-              )}
-
-            </div>
+      return activeAccounts.map((account) => (
+        <div 
+          key={account.ACCOUNT_NUMBER} 
+          onClick={() => navigate('/account', { state: { accountNumber: account.ACCOUNT_NUMBER } })}
+          className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 hover:shadow-md transition-all border-l-4 border-l-[#004a99] cursor-pointer group"
+        >
+          <div>
+            <h3 className="font-bold text-gray-800 text-lg group-hover:text-[#004a99] transition-colors">
+              {account.ACCOUNT_TYPE}
+            </h3>
+            <p className="text-gray-400 font-mono text-sm tracking-widest">
+              •••• {String(account.ACCOUNT_NUMBER).slice(-4)}
+            </p>
           </div>
+          <div className="text-left sm:text-right">
+            <p className="text-xs font-bold text-gray-400 uppercase mb-1">Balance</p>
+            <p className="text-2xl font-black text-gray-900">${Number(account.BALANCE).toLocaleString()}</p>
+          </div>
+        </div>
+      ));
+    })()}
+  </div>
+</div>
 
           {/* RECENT ACTIVITY */}
           <div>
