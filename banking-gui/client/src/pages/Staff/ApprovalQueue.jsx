@@ -2,70 +2,70 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, Check, X, 
-  FileText, ArrowUpRight, Landmark, Clock 
+  ArrowLeft, Check, X, Lock,
+  Landmark, Clock 
 } from 'lucide-react';
 import euiLogo from '../../assets/eui-logo.png';
 
 export default function ApprovalQueue() {
   const navigate = useNavigate();
+  
+  const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+  const isManager = staffData.JOB_ID === 1;
 
-  /* 
-    SQL BACKEND LOGIC:
-    1. SELECT * FROM approvals_view WHERE status = 'PENDING';
-    2. JOIN users ON approvals.user_id = users.id;
-  */
-  const [requests, setRequests] = useState([]);
-
-const handleAction = async (id, action) => {
-
-  try {
-
-    await axios.put(
-      `http://localhost:3000/approvals/${id}`,
-      {
-        action: action.toLowerCase()
-      }
+  if (!isManager) {
+    return (
+      <div className="min-h-screen bg-[#f3f4f6] flex flex-col items-center justify-center p-8">
+        <div className="bg-white p-12 rounded-[3rem] shadow-xl text-center max-w-md border border-red-100">
+          <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500">
+            <Lock size={40} />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Access Denied</h2>
+          <p className="text-gray-500 mb-8">
+            Only <b>Managers</b> can access the Approval Queue.
+          </p>
+          <button 
+            onClick={() => navigate('/staff-dashboard')} 
+            className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+          >
+            <ArrowLeft size={18} /> Back to Dashboard
+          </button>
+        </div>
+      </div>
     );
-
-    // Remove from UI instantly
-    setRequests(
-      requests.filter(req => req.LOAN_ID !== id)
-    );
-
-  } catch (err) {
-
-    console.error(err);
-
-    alert("Failed to update approval");
-
   }
 
-};
+  const [requests, setRequests] = useState([]);
+  const [totalToday, setTotalToday] = useState(0);
+  
+  const handleAction = async (id, action) => {
+    try {
+      await axios.put(`http://localhost:3000/approvals/${id}`, {
+        action: action.toLowerCase()
+      });
+      // Remove from UI instantly
+      setRequests(requests.filter(req => req.LOAN_ID !== id));
+      // Optionally decrement totalToday if you want the UI to update instantly
+      if (totalToday > 0) setTotalToday(totalToday - 1);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update approval");
+    }
+  };
 
   useEffect(() => {
+    fetchRequests();
+  }, []);
 
-  fetchRequests();
-
-}, []);
-
-const fetchRequests = async () => {
-
-  try {
-
-    const response = await axios.get(
-      "http://localhost:3000/approvals"
-    );
-
-    setRequests(response.data);
-
-  } catch (err) {
-
-    console.error(err);
-
-  }
-
-};
+  const fetchRequests = async () => {
+    try {
+      const response = await axios.get("http://localhost:3000/approvals");
+      setRequests(response.data.requests);
+      setTotalToday(response.data.totalToday);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans pb-12">
@@ -88,11 +88,10 @@ const fetchRequests = async () => {
 
       <main className="max-w-5xl mx-auto p-8">
         
-        {/* SUMMARY SECTION */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* SUMMARY SECTION - 2 columns */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <StatCard title="Total Pending" value={requests.length} color="blue" />
-          <StatCard title="Weekly Volume" value="142" color="blue" />
-          <StatCard title="Avg. Wait Time" value="4.2h" color="gray" />
+          <StatCard title="Total Today" value={totalToday} color="blue" />
         </div>
 
         {/* REQUEST LIST */}
@@ -104,9 +103,9 @@ const fetchRequests = async () => {
                 className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between group hover:shadow-md transition-all animate-in fade-in slide-in-from-bottom-4 duration-300"
               >
                 <div className="flex items-center gap-6 w-full md:w-auto">
-<div className="p-4 rounded-2xl bg-blue-50 text-[#004a99]">
-  <Landmark size={24} />
-</div>
+                  <div className="p-4 rounded-2xl bg-blue-50 text-[#004a99]">
+                    <Landmark size={24} />
+                  </div>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">#{req.LOAN_ID} • Loan Application</span>
@@ -166,7 +165,7 @@ function StatCard({ title, value, color }) {
   return (
     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">{title}</p>
-      <p className={`text-3xl font-black ${colors[color].split(' ')[0]}`}>{value}</p>
+      <p className={`text-3xl font-black ${colors[color]?.split(' ')[0]}`}>{value}</p>
     </div>
   );
 }

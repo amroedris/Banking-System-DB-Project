@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios'
+import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { 
   Search, Snowflake, User, ArrowLeft, 
-  CheckCircle, AlertCircle, Eye 
+  CheckCircle, AlertCircle, Eye, Lock
 } from 'lucide-react';
 import euiLogo from '../../assets/eui-logo.png';
 
@@ -18,9 +18,7 @@ export default function UserDirectory() {
 
   const fetchUsers = async () => {
     try {
-      const response = await axios.get(
-        "http://localhost:3000/staff/customers"
-      );
+      const response = await axios.get("http://localhost:3000/staff/customers");
       setUsers(response.data);
     } catch (err) {
       console.error(err);
@@ -31,30 +29,32 @@ export default function UserDirectory() {
   const filteredUsers = users.filter((user) => {
     const query = searchTerm.toLowerCase();
     return (
-      (user.FIRST_NAME + " " + user.LAST_NAME)
-        .toLowerCase()
-        .includes(query)
-      ||
-      String(user.NATIONAL_ID || "")
-        .includes(searchTerm)
+      (user.FIRST_NAME + " " + user.LAST_NAME).toLowerCase().includes(query) ||
+      String(user.NATIONAL_ID || "").includes(searchTerm)
     );
   });
 
+  // --- FIXED FREEZE LOGIC ---
   const toggleFreeze = async (id, currentStatus) => {
+    if (currentStatus === 'CLOSED') {
+      alert("Closed accounts are permanently locked and cannot be modified.");
+      return;
+    }
+
     try {
-      const nextStatus = currentStatus === "ACTIVE" ? "FROZEN" : "ACTIVE";
+      // Backend expects 'FROZEN' to lock, 'ACTIVE' to unlock
+      const payloadStatus = currentStatus === "ACTIVE" ? "FROZEN" : "ACTIVE";
+      
       await axios.put(
         `http://localhost:3000/staff/customer/${id}/freeze`,
-        { status: nextStatus }
+        { status: payloadStatus }
       );
 
-      setUsers(
-        users.map((user) =>
-          user.CUSTOMER_ID === id
-            ? { ...user, STATUS: nextStatus }
-            : user
-        )
-      );
+      // Re-fetch users instead of guessing the outcome! 
+      // If the backend ignored the update (e.g. they have no accounts), 
+      // the UI will correctly stay exactly the same.
+      await fetchUsers();
+      
     } catch (err) {
       console.error(err);
       alert("Failed to update status");
@@ -93,7 +93,7 @@ export default function UserDirectory() {
           
           <div className="flex gap-3 w-full md:w-auto">
             <button 
-              onClick={() => navigate('/add-account')} 
+              onClick={() => navigate('/add-user')} 
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-8 py-3 rounded-2xl bg-[#004a99] text-white font-bold text-sm shadow-lg hover:bg-[#003d7a] transition-all"
             >
               <User size={18} />
@@ -136,9 +136,11 @@ export default function UserDirectory() {
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
                           user.STATUS === 'ACTIVE' 
                             ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
+                            : user.STATUS === 'CLOSED'
+                            ? 'bg-gray-50 text-gray-500 border border-gray-200'
                             : 'bg-red-50 text-red-600 border border-red-100'
                         }`}>
-                          {user.STATUS === 'ACTIVE' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+                          {user.STATUS === 'ACTIVE' ? <CheckCircle size={12} /> : user.STATUS === 'CLOSED' ? <Lock size={12} /> : <AlertCircle size={12} />}
                           {user.STATUS}
                         </span>
                       </td>
@@ -146,12 +148,15 @@ export default function UserDirectory() {
                         <div className="flex items-center justify-center gap-2">
                           <button 
                             onClick={() => toggleFreeze(user.CUSTOMER_ID, user.STATUS)}
+                            disabled={user.STATUS === 'CLOSED'}
                             className={`p-2.5 rounded-xl transition-all ${
                               user.STATUS === 'ACTIVE' 
                                 ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-50' 
+                                : user.STATUS === 'CLOSED'
+                                ? 'text-gray-200 cursor-not-allowed'
                                 : 'text-cyan-600 bg-cyan-50 hover:bg-cyan-100'
                             }`}
-                            title={user.STATUS === 'ACTIVE' ? "Freeze Account" : "Unfreeze Account"}
+                            title={user.STATUS === 'ACTIVE' ? "Freeze Account" : user.STATUS === 'CLOSED' ? "Account Closed" : "Unfreeze Account"}
                           >
                             <Snowflake size={20} />
                           </button>

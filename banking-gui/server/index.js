@@ -283,6 +283,7 @@ app.get("/transactions/:accountNumber", async (req, res) => {
 });
 
 // FETCH ALL CARDS FOR A CUSTOMER
+// FETCH ALL CARDS FOR A CUSTOMER
 app.get("/cards/:customerId", async (req, res) => {
   const customerId = req.params.customerId;
   let connection;
@@ -298,6 +299,7 @@ app.get("/cards/:customerId", async (req, res) => {
           c.CVV, 
           c.CARD_STATUS, 
           c.ACCOUNT_NUMBER,
+          c.CARD_LIMIT,
           cust.FIRST_NAME || ' ' || cust.LAST_NAME as CARDHOLDER
        FROM CARD c
        JOIN CUSTOMER_ACCOUNT ca ON c.ACCOUNT_NUMBER = ca.ACCOUNT_NUMBER
@@ -1014,48 +1016,55 @@ app.get("/admin/activity", async (req, res) => {
 
 });
 
+// GET PENDING LOAN APPROVALS
 app.get("/approvals", async (req, res) => {
-
   let connection;
-
   try {
-
     connection = await oracledb.getConnection(dbConfig);
 
-    const result = await connection.execute(
+    // 1. Get the list of all pending loans
+    const listResult = await connection.execute(
       `
-SELECT
-  l.loan_id,
-  l.customer_id,
-  l.loan_amount,
-  l.loan_term,
-  l.interest_rate,
-  l.status,
-  c.first_name || ' ' || c.last_name AS customer_name
-FROM loan l
-JOIN customer c
-  ON l.customer_id = c.customer_id
-WHERE l.status = 'Pending'
+      SELECT
+        l.loan_id,
+        l.customer_id,
+        l.loan_amount,
+        l.loan_term,
+        l.interest_rate,
+        l.status,
+        c.first_name || ' ' || c.last_name AS customer_name
+      FROM loan l
+      JOIN customer c
+        ON l.customer_id = c.customer_id
+      WHERE l.status = 'Pending'
       `,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    res.json(result.rows);
+    // 2. Count ONLY today's pending loans using Oracle's TRUNC()
+    const countResult = await connection.execute(
+      `
+      SELECT COUNT(*) AS TOTAL 
+      FROM loan 
+      WHERE TRUNC(start_date) = TRUNC(SYSDATE)
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // 3. Send the EXACT structure React is looking for!
+    res.json({
+      requests: listResult.rows,
+      totalToday: countResult.rows[0].TOTAL
+    });
 
   } catch (err) {
-
     console.error(err);
-
     res.status(500).send(err.message);
-
   } finally {
-
-    if (connection)
-      await connection.close();
-
+    if (connection) await connection.close();
   }
-
 });
 
 app.put("/approvals/:loanId", async (req, res) => {
@@ -1293,6 +1302,239 @@ app.put("/staff/account/:accountNumber/freeze", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+
+// CREATE NEW ACCOUNT FOR EXISTING CUSTOMER
+app.post("/staff/customer/:id/accounts", async (req, res) => {
+  const customerId = req.params.id;
+  const { accountType, initialDeposit, branchId } = req.body;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    
+    // 1. Generate new account number
+    const maxResult = await connection.execute(
+      `SELECT NVL(MAX(account_number), 100000000000) + 1 AS next_num FROM account`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const newAccountNumber = maxResult.rows[0].NEXT_NUM;
+
+    // 2. Create the account
+    await connection.execute(
+      `INSERT INTO account (account_number, account_type, balance, status, branch_id)
+       VALUES (:accountNumber, :accountType, :balance, 'Active', :branchId)`,
+      {
+        accountNumber: newAccountNumber,
+        accountType: accountType || 'Savings',
+        balance: initialDeposit || 0,
+        branchId: branchId || 101
+      }
+    );
+
+    // 3. Link account to the customer
+    await connection.execute(
+      `INSERT INTO customer_account (customer_id, account_number)
+       VALUES (:customerId, :accountNumber)`,
+      { customerId, accountNumber: newAccountNumber }
+    );
+
+    await connection.commit();
+    res.json({ success: true, accountNumber: newAccountNumber });
+  } catch (err) {
+    console.error(err);
+    if (connection) await connection.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// ISSUE NEW CARD TO A SPECIFIC ACCOUNT
+// ISSUE NEW CARD TO A SPECIFIC ACCOUNT
+// ISSUE NEW CARD TO A SPECIFIC ACCOUNT
+app.post("/staff/account/:accountNumber/cards", async (req, res) => {
+  const { accountNumber } = req.params;
+  const { cardType, cardLimit } = req.body; // <-- Now capturing cardLimit
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // 1. Get next Card ID
+    const maxResult = await connection.execute(
+      `SELECT NVL(MAX(card_id), 5000) + 1 AS next_id FROM card`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const newCardId = maxResult.rows[0].NEXT_ID;
+
+    // 2. Generate Bank Data (16 digit number, 3 digit CVV)
+    const cardNumber = '4' + Math.floor(100000000000000 + Math.random() * 900000000000000).toString();
+    const cvv = Math.floor(100 + Math.random() * 900).toString();
+
+    // 3. Insert into database (ADDED card_limit)
+    await connection.execute(
+      `INSERT INTO card (card_id, card_type, card_limit, card_number, issue_date, expiry_date, cvv, card_status, account_number)
+       VALUES (:id, :type, :limit, :num, SYSDATE, ADD_MONTHS(SYSDATE, 48), :cvv, 'Active', :accNum)`,
+      {
+        id: newCardId,
+        type: cardType || 'Debit',
+        limit: cardLimit || null, // <-- Sends limit for Credit, NULL for Debit
+        num: cardNumber,
+        cvv: cvv,
+        accNum: accountNumber
+      },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true, message: "Card issued successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+
+// UPDATE CREDIT CARD LIMIT
+app.put("/staff/cards/:cardId/limit", async (req, res) => {
+  const { cardId } = req.params;
+  const { newLimit } = req.body;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    await connection.execute(
+      `UPDATE card SET card_limit = :newLimit WHERE card_id = :cardId`,
+      { newLimit, cardId },
+      { autoCommit: true }
+    );
+    res.json({ success: true, message: "Limit updated" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+
+// ==========================================
+// FULL TRANSACTION LOGS FOR STAFF DASHBOARD
+// ==========================================
+app.get("/staff/transactions", async (req, res) => {
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // Double LEFT JOIN: 
+    // 1st gets the Sender's name by linking their account to the customer table
+    // 2nd gets the Receiver's name by linking their account to the customer table
+    const result = await connection.execute(
+      `SELECT
+          bt.transaction_id,
+          bt.transaction_type,
+          bt.amount,
+          bt.transaction_time,
+          bt.status,
+          bt.sender_account_number,
+          bt.receiver_account_number,
+          c_sender.first_name || ' ' || c_sender.last_name AS sender_name,
+          c_receiver.first_name || ' ' || c_receiver.last_name AS receiver_name
+       FROM bank_transaction bt
+       LEFT JOIN customer_account ca_sender 
+         ON bt.sender_account_number = ca_sender.account_number
+       LEFT JOIN customer c_sender 
+         ON ca_sender.customer_id = c_sender.customer_id
+       LEFT JOIN customer_account ca_receiver 
+         ON bt.receiver_account_number = ca_receiver.account_number
+       LEFT JOIN customer c_receiver 
+         ON ca_receiver.customer_id = c_receiver.customer_id
+       ORDER BY bt.transaction_time DESC`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+
+// ==========================================
+// CREATE NEW CUSTOMER (ONBOARDING)
+// ==========================================
+app.post("/staff/customers", async (req, res) => {
+  const customerData = req.body;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // 1. Generate a new sequential Customer ID
+    const maxCustResult = await connection.execute(
+      `SELECT NVL(MAX(customer_id), 1000) + 1 AS next_id FROM customer`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const newCustomerId = maxCustResult.rows[0].NEXT_ID;
+
+    // 2. Insert into main CUSTOMER table 
+    // (Note: TO_DATE is used to safely convert the React HTML date string for Oracle)
+    await connection.execute(
+      `INSERT INTO customer (
+        customer_id, first_name, middle_name, last_name, email, street, city, governorate,
+        national_id, dob, username, password
+      ) VALUES (
+        :customerId, :firstName, :middleName, :lastName, :email, :street, :city, :governorate,
+        :nationalId, TO_DATE(:dob, 'YYYY-MM-DD'), :username, :password
+      )`,
+      {
+        customerId: newCustomerId,
+        firstName: customerData.firstName,
+        middleName: customerData.middleName || null,
+        lastName: customerData.lastName,
+        email: customerData.email,
+        street: customerData.street,
+        city: customerData.city,
+        governorate: customerData.governorate,
+        nationalId: customerData.nationalId,
+        dob: customerData.dob,
+        username: customerData.username,
+        password: customerData.password,
+      }
+    );
+
+    // 3. Insert into CUSTOMER_PHONE table if they provided a phone number
+    if (customerData.phone && customerData.phone.trim() !== "") {
+      await connection.execute(
+        `INSERT INTO customer_phone (customer_id, customer_phone)
+         VALUES (:customerId, :phone)`,
+        { customerId: newCustomerId, phone: customerData.phone }
+      );
+    }
+
+    // 4. Save all changes permanently
+    await connection.commit();
+    
+    // 5. Send the new ID back to React so it can display the success screen
+    res.json({ success: true, customerId: newCustomerId });
+
+  } catch (err) {
+    console.error("Error creating customer:", err);
+    if (connection) await connection.rollback(); // Undo everything if it fails
     res.status(500).json({ message: err.message });
   } finally {
     if (connection) await connection.close();

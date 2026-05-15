@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, UserPlus, Mail, Briefcase, 
+  ArrowLeft, UserPlus, Mail, Briefcase, Lock,
   ShieldCheck, CheckCircle, AlertCircle 
 } from 'lucide-react';
 import euiLogo from '../../assets/eui-logo.png';
@@ -9,34 +10,73 @@ import euiLogo from '../../assets/eui-logo.png';
 export default function AddStaff() {
   const navigate = useNavigate();
   
-  // In a real DB, this would be: SELECT MAX(id) FROM staff;
-  const nextId = "S105"; 
-  const managerTeam = "BRANCH_CAIRO_01";
+  const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+  const isManager = staffData.JOB_ID === 1;
+
+  if (!isManager) {
+    return (
+      <div className="min-h-screen bg-[#f3f4f6] flex flex-col items-center justify-center p-8">
+        <div className="bg-white p-12 rounded-[3rem] shadow-xl text-center max-w-md border border-red-100">
+          <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500">
+            <Lock size={40} />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Access Denied</h2>
+          <p className="text-gray-500 mb-8">
+            Only <b>Managers</b> can add new staff members.
+          </p>
+          <button 
+            onClick={() => navigate('/staff-directory')} 
+            className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+          >
+            <ArrowLeft size={18} /> Back to Staff Directory
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     email: '',
     role: 'Teller',
-    teamId: managerTeam
+    salary: ''
   });
 
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Simulate API/SQL Call: INSERT INTO staff (id, name, email, role, team_id) ...
-    console.log("New Staff Member:", { id: nextId, ...formData });
-    
-    setIsSuccess(true);
-    setTimeout(() => {
-      navigate('/staff-directory');
-    }, 2000);
+    setIsSubmitting(true);
+    setError('');      try {
+      const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+      
+      await axios.post('http://localhost:3000/staff', {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        role: formData.role,
+        salary: Number(formData.salary) || 5000,
+        supervisorId: staffData.EMPLOYEE_ID || null
+      });
+
+      setIsSuccess(true);
+      setTimeout(() => {
+        navigate('/staff-directory');
+      }, 2000);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to create staff member.');
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans pb-12">
       
-      {/* HEADER */}
       <nav className="bg-white border-b border-gray-100 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/staff-directory')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-all">
@@ -55,7 +95,7 @@ export default function AddStaff() {
               <CheckCircle size={40} />
             </div>
             <h2 className="text-2xl font-bold text-gray-800">Registration Complete</h2>
-            <p className="text-gray-500 mt-2"><b>{formData.name}</b> has been added to <b>{formData.teamId}</b>.</p>
+            <p className="text-gray-500 mt-2"><b>{formData.firstName} {formData.lastName}</b> has been added as <b>{formData.role}</b>.</p>
             <p className="text-xs text-gray-400 mt-8 italic">Redirecting to Team Directory...</p>
           </div>
         ) : (
@@ -66,30 +106,49 @@ export default function AddStaff() {
                   <h2 className="text-2xl font-bold">Employee Profile</h2>
                   <p className="text-blue-200 text-xs mt-1 uppercase tracking-widest font-bold">Internal System Access</p>
                 </div>
-                <div className="bg-white/10 px-4 py-2 rounded-xl backdrop-blur-md border border-white/20">
-                  <p className="text-[10px] uppercase text-blue-100">Assigned ID</p>
-                  <p className="font-mono font-bold">{nextId}</p>
-                </div>
               </div>
             </div>
 
             <form onSubmit={handleSubmit} className="p-10 space-y-8">
-              {/* FULL NAME */}
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  <ShieldCheck size={14} className="text-[#a37e2c]" /> Full Name
-                </label>
-                <input 
-                  required
-                  type="text" 
-                  placeholder="e.g. Ahmed Kamal"
-                  className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                />
+              {error && (
+                <div className="flex items-center gap-2 p-4 bg-red-50 text-red-600 rounded-2xl border border-red-100">
+                  <AlertCircle size={18} />
+                  <span className="text-sm font-medium">{error}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    <ShieldCheck size={14} className="text-[#a37e2c]" /> First Name
+                  </label>
+                  <input 
+                    required
+                    type="text" 
+                    placeholder="Ahmed"
+                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
+                    value={formData.firstName}
+                    onChange={(e) => setFormData({...formData, firstName: e.target.value})}
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    <ShieldCheck size={14} className="text-[#a37e2c]" /> Last Name
+                  </label>
+                  <input 
+                    required
+                    type="text" 
+                    placeholder="Kamal"
+                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
+                    value={formData.lastName}
+                    onChange={(e) => setFormData({...formData, lastName: e.target.value})}
+                    disabled={isSubmitting}
+                  />
+                </div>
               </div>
 
-              {/* EMAIL ADDRESS */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
                   <Mail size={14} className="text-[#a37e2c]" /> Work Email
@@ -101,11 +160,11 @@ export default function AddStaff() {
                   className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] transition-all font-medium"
                   value={formData.email}
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  disabled={isSubmitting}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-6">
-                {/* ROLE SELECTION */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
                     <Briefcase size={14} className="text-[#a37e2c]" /> System Role
@@ -114,6 +173,7 @@ export default function AddStaff() {
                     className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] appearance-none font-medium"
                     value={formData.role}
                     onChange={(e) => setFormData({...formData, role: e.target.value})}
+                    disabled={isSubmitting}
                   >
                     <option value="Teller">Teller</option>
                     <option value="Analyst">Analyst</option>
@@ -121,26 +181,34 @@ export default function AddStaff() {
                   </select>
                 </div>
 
-                {/* TEAM ID (READ ONLY) */}
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Assigned Team</label>
-                  <div className="w-full px-6 py-4 bg-gray-100 border border-gray-200 rounded-2xl text-gray-400 font-mono text-sm">
-                    {formData.teamId}
-                  </div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Salary ($)</label>
+                  <input
+                    type="number"
+                    min="1000"
+                    placeholder="5000"
+                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] font-medium"
+                    value={formData.salary}
+                    onChange={(e) => setFormData({...formData, salary: e.target.value})}
+                    disabled={isSubmitting}
+                  />
                 </div>
               </div>
 
               <div className="pt-6">
                 <button 
                   type="submit"
-                  className="w-full py-5 bg-[#004a99] text-white rounded-3xl font-bold shadow-xl shadow-blue-100 hover:bg-[#003d7a] hover:-translate-y-1 transition-all flex items-center justify-center gap-3"
+                  disabled={isSubmitting}
+                  className="w-full py-5 bg-[#004a99] text-white rounded-3xl font-bold shadow-xl shadow-blue-100 hover:bg-[#003d7a] hover:-translate-y-1 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <UserPlus size={20} />
-                  Confirm Staff Registration
+                  {isSubmitting ? (
+                    <span className="animate-pulse">Processing...</span>
+                  ) : (
+                    <>
+                      <UserPlus size={20} /> Register Employee
+                    </>
+                  )}
                 </button>
-                <p className="text-center text-[10px] text-gray-400 mt-4 flex items-center justify-center gap-1">
-                  <AlertCircle size={10} /> Action will be recorded in System Audit Logs
-                </p>
               </div>
             </form>
           </div>

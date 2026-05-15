@@ -9,7 +9,6 @@ import euiLogo from '../../assets/eui-logo.png';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [staffRole, setStaffRole] = useState('manager'); 
 
 const [stats, setStats] = useState({
   liquidity: 0,
@@ -19,6 +18,8 @@ const [stats, setStats] = useState({
 
 const [activities, setActivities] = useState([]);
 
+const staff = JSON.parse(localStorage.getItem("staff"));
+const isManager = staff?.JOB_ID === 1;
 
 useEffect(() => {
 
@@ -52,8 +53,6 @@ const fetchDashboardData = async () => {
 
 };
 
-const staff = JSON.parse(localStorage.getItem("staff"));
-
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans">
       
@@ -71,7 +70,7 @@ const staff = JSON.parse(localStorage.getItem("staff"));
         <div className="flex items-center gap-6">
           <div className="text-right">
             <p className="text-sm font-bold text-gray-700"> {staff?.FIRST_NAME} {staff?.LAST_NAME}</p>
-            <p className="text-xs text-gray-400 capitalize">{staffRole} {staff?.JOB_ID} Access</p>
+            <p className="text-xs text-gray-400 capitalize">{isManager ? 'Manager' : 'Teller'} Access</p>
           </div>
           <button 
             onClick={() => navigate('/', { replace: true })}
@@ -142,7 +141,7 @@ const staff = JSON.parse(localStorage.getItem("staff"));
 
           {/* ADD NEW ACCOUNT */}
           <ToolCard 
-            onClick={() => navigate('/add-account')}
+            onClick={() => navigate('/add-user')}
             icon={<UserPlus size={28} />} 
             label="New Onboarding" 
             color="text-emerald-600" 
@@ -159,7 +158,7 @@ const staff = JSON.parse(localStorage.getItem("staff"));
           />
 
           {/* MANAGER ONLY: STAFF MANAGEMENT */}
-          {staffRole === 'manager' && (
+          {isManager && (
             <ToolCard 
               onClick={() => navigate('/staff-directory')}
               icon={<ShieldCheck size={28} />} 

@@ -1,540 +1,298 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft,
-  User,
-  CreditCard,
-  History,
-  Wallet,
-  Shield,
-  MapPin,
-  Phone,
-  Mail,
-  CheckCircle,
-  Snowflake,
-  Pencil,
-  X,
-  Save
+import { useParams, useNavigate } from 'react-router-dom';
+import { 
+  ArrowLeft, Mail, Phone, MapPin, 
+  CreditCard, Activity, Snowflake, Plus, Lock, Landmark, Edit2 // <-- Added Edit2 Icon
 } from 'lucide-react';
-
 import euiLogo from '../../assets/eui-logo.png';
+import AddCardModal from './AddCardModal';
+import AddAccountForCustomer from './AddAccountForCustomer'; 
+import EditLimitModal from './EditLimitModal'; // <-- IMPORT NEW MODAL
 
 export default function CustomerDetails() {
-  const navigate = useNavigate();
   const { id } = useParams();
-  const [activeTab, setActiveTab] = useState('overview');
-
-  // MODAL STATE
-  const [isEditOpen, setIsEditOpen] = useState(false);
-
-  // DATABASE DATA
+  const navigate = useNavigate();
+  
   const [customer, setCustomer] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [cards, setCards] = useState([]); 
+  const [loading, setLoading] = useState(true);
 
-  // EDIT FORM DATA
-  const [editData, setEditData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: ''
-  });
+  // MODAL STATES
+  const [isCardModalOpen, setIsCardModalOpen] = useState(false);
+  const [selectedAccountForCard, setSelectedAccountForCard] = useState(null);
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false); 
+  
+  // NEW STATE FOR EDIT LIMIT MODAL
+  const [isEditLimitModalOpen, setIsEditLimitModalOpen] = useState(false);
+  const [limitModalData, setLimitModalData] = useState({ cardId: null, currentLimit: 0 });
 
-  // FETCH CUSTOMER DATA
   useEffect(() => {
-    fetchCustomer();
+    fetchDetails();
   }, [id]);
 
-  const fetchCustomer = async () => {
+  const fetchDetails = async () => {
     try {
-      const response = await axios.get(
-        `http://localhost:3000/staff/customer/${id}`
-      );
+      const [profileRes, cardsRes] = await Promise.all([
+        axios.get(`http://localhost:3000/staff/customer/${id}`),
+        axios.get(`http://localhost:3000/cards/${id}`)
+      ]);
 
-      setCustomer(response.data.customer);
-      setAccounts(response.data.accounts);
-      setTransactions(response.data.transactions);
-
-      setEditData({
-        name: `${response.data.customer.FIRST_NAME} ${response.data.customer.LAST_NAME}`,
-        email: response.data.customer.EMAIL || '',
-        phone: response.data.customer.CUSTOMER_PHONE || '',
-        address: `${response.data.customer.STREET || ''}, ${response.data.customer.CITY || ''}`
-      });
+      setCustomer(profileRes.data.customer);
+      setAccounts(profileRes.data.accounts || []);
+      setTransactions(profileRes.data.transactions || []);
+      setCards(cardsRes.data || []);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // UPDATE CUSTOMER
-const handleUpdate = async (e) => {
-  e.preventDefault();
-  try {
-    // Split "First Last" back into parts
-    const [firstName, ...rest] = editData.name.trim().split(' ');
-    const lastName = rest.join(' ');
-
-    // Split "street, city" back into parts
-    const [street, ...cityParts] = editData.address.split(',');
-    const city = cityParts.join(',').trim();
-
-    await axios.put(`http://localhost:3000/customer/${id}`, {
-      firstName: firstName || '',
-      lastName: lastName || '',
-      email: editData.email,
-      phone: editData.phone,
-      street: street?.trim() || '',
-      city: city || '',
-      governorate: customer.GOVERNORATE || ''  // preserve existing value
-    });
-
-    fetchCustomer();
-    setIsEditOpen(false);
-  } catch (err) {
-    console.error(err);
-    alert("Failed to update customer");
-  }
-};
-
-  // TOGGLE INDIVIDUAL ACCOUNT FREEZE
   const toggleAccountFreeze = async (accountNumber, currentStatus) => {
+    if (currentStatus === 'Closed') return;
     try {
-      const nextStatus = currentStatus.toUpperCase() === "ACTIVE" ? "Inactive" : "Active";
-      
-      await axios.put(
-        `http://localhost:3000/staff/account/${accountNumber}/freeze`,
-        { status: nextStatus }
-      );
-
-      // Dynamically update UI state
-      setAccounts(prevAccounts =>
-        prevAccounts.map(acc =>
-          acc.ACCOUNT_NUMBER === accountNumber
-            ? { ...acc, STATUS: nextStatus }
-            : acc
-        )
-      );
+      const nextStatus = currentStatus === "Active" ? "Inactive" : "Active";
+      await axios.put(`http://localhost:3000/staff/account/${accountNumber}/freeze`, {
+        status: nextStatus
+      });
+      await fetchDetails(); 
     } catch (err) {
       console.error(err);
-      alert("Failed to alter account freeze status");
+      alert("Failed to update account status");
     }
   };
 
-  // LOADING STATE
-  if (!customer) {
-    return (
-      <div className="p-10 text-center">
-        Loading customer...
-      </div>
-    );
-  }
+  const openIssueCardModal = (accountNumber) => {
+    setSelectedAccountForCard(accountNumber);
+    setIsCardModalOpen(true);
+  };
+
+  const openEditLimitModal = (cardId, currentLimit) => {
+    setLimitModalData({ cardId, currentLimit });
+    setIsEditLimitModalOpen(true);
+  };
+
+  if (loading) return <div className="p-8 text-center text-gray-500 font-bold">Loading Profile...</div>;
+  if (!customer) return <div className="p-8 text-center text-red-500 font-bold">Customer not found</div>;
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] font-sans pb-12 relative overflow-x-hidden">
-
-      {/* NAVIGATION BAR */}
-      <nav className="bg-white border-b border-gray-100 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500"
-          >
-            <ArrowLeft size={20} />
-          </button>
-
-          <img
-            src={euiLogo}
-            alt="EUI Logo"
-            className="h-10 object-contain"
-          />
-
-          <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
-
-          <h1 className="text-lg font-bold text-[#004a99]">
-            Customer Profile
-          </h1>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => setIsEditOpen(true)}
-            className="px-4 py-2 rounded-xl bg-[#004a99] text-white font-bold text-xs shadow-md hover:bg-[#003d7a] transition-all flex items-center gap-2"
-          >
-            <Pencil size={14} />
-            Edit Profile
-          </button>
-        </div>
+    <div className="min-h-screen bg-[#f3f4f6] font-sans pb-12 relative">
+      <nav className="bg-white border-b border-gray-100 px-8 py-4 flex items-center gap-4 sticky top-0 z-50">
+        <button onClick={() => navigate('/user-directory')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500">
+          <ArrowLeft size={20} />
+        </button>
+        <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+        <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
+        <h1 className="text-lg font-bold text-[#004a99]">Customer Profile</h1>
       </nav>
 
-      <main className="max-w-6xl mx-auto p-8">
-
-        {/* PROFILE HEADER */}
-        <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100 mb-8 flex flex-col md:flex-row items-center gap-8">
-          <div className="h-24 w-24 rounded-3xl bg-blue-50 flex items-center justify-center text-[#004a99] text-4xl font-bold border-2 border-white shadow-inner">
-            {customer.FIRST_NAME?.charAt(0)}
-          </div>
-
-          <div className="flex-1 text-center md:text-left">
-            <div className="flex items-center justify-center md:justify-start gap-3 mb-1">
-              <h2 className="text-3xl font-bold text-gray-800">
-                {customer.FIRST_NAME} {customer.LAST_NAME}
-              </h2>
-
-              <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-wider border border-emerald-100 flex items-center gap-1">
-                <CheckCircle size={12} />
-                Active
-              </span>
+      <main className="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* LEFT: CUSTOMER INFO */}
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 text-center">
+            <div className="h-24 w-24 rounded-full bg-blue-50 text-[#004a99] flex items-center justify-center text-3xl font-bold mx-auto mb-4">
+              {customer.FIRST_NAME?.charAt(0)}
             </div>
-
-            <p className="text-gray-400 font-medium flex items-center justify-center md:justify-start gap-2 text-sm">
-              <Shield size={14} />
-              Customer ID: {customer.CUSTOMER_ID}
-            </p>
-          </div>
-
-          <div className="flex gap-4">
-            <div className="text-center px-6 border-r border-gray-100">
-              <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">
-                Total Assets
-              </p>
-              <p className="text-xl font-bold text-gray-800">
-                $
-                {
-                  accounts
-                    .reduce(
-                      (sum, acc) => sum + Number(acc.BALANCE),
-                      0
-                    )
-                    .toLocaleString()
-                }
-              </p>
-            </div>
-
-            <div className="text-center px-6">
-              <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">
-                Risk Score
-              </p>
-              <p className="text-xl font-bold text-[#a37e2c]">
-                Low
-              </p>
+            <h2 className="text-2xl font-bold text-gray-800">{customer.FIRST_NAME} {customer.LAST_NAME}</h2>
+            <p className="text-sm text-gray-400 mb-6">ID: {customer.CUSTOMER_ID}</p>
+            
+            <div className="space-y-4 text-left border-t border-gray-50 pt-6">
+              <InfoRow icon={<Mail size={16}/>} label="Email" value={customer.EMAIL} />
+              <InfoRow icon={<Phone size={16}/>} label="Phone" value={customer.CUSTOMER_PHONE || 'N/A'} />
+              <InfoRow icon={<MapPin size={16}/>} label="Address" value={`${customer.STREET || ''}, ${customer.CITY || ''}`} />
             </div>
           </div>
         </div>
 
-        {/* TAB SELECTOR */}
-        <div className="flex gap-8 mb-6 border-b border-gray-200 px-4">
-          <TabButton
-            active={activeTab === 'overview'}
-            onClick={() => setActiveTab('overview')}
-            label="Overview"
-            icon={<User size={18} />}
-          />
+        {/* RIGHT: ACCOUNTS, CARDS, & TRANSACTIONS */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                <Landmark className="text-[#a37e2c]" size={20}/> Bank Accounts
+              </h3>
+              <button 
+                onClick={() => setIsAccountModalOpen(true)} 
+                className="flex items-center gap-1 text-sm font-bold text-[#004a99] hover:underline"
+              >
+                <Plus size={16} /> Open Account
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {accounts.length > 0 ? accounts.map((acc) => {
+                const accountCards = cards.filter(c => c.ACCOUNT_NUMBER === acc.ACCOUNT_NUMBER);
 
-          <TabButton
-            active={activeTab === 'accounts'}
-            onClick={() => setActiveTab('accounts')}
-            label="Accounts & Cards"
-            icon={<Wallet size={18} />}
-          />
-
-          <TabButton
-            active={activeTab === 'history'}
-            onClick={() => setActiveTab('history')}
-            label="Activity Log"
-            icon={<History size={18} />}
-          />
-        </div>
-
-        {/* CONTENT */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* OVERVIEW TAB */}
-            {activeTab === 'overview' && (
-              <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 transition-all">
-                <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
-                  <div className="w-1.5 h-5 bg-[#a37e2c] rounded-full"></div>
-                  Personal Information
-                </h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <InfoBox
-                    label="Email Address"
-                    value={customer.EMAIL}
-                    icon={<Mail size={16} />}
-                  />
-
-                  <InfoBox
-                    label="Phone Number"
-                    value={customer.CUSTOMER_PHONE}
-                    icon={<Phone size={16} />}
-                  />
-
-                  <InfoBox
-                    label="Home Address"
-                    value={`${customer.STREET || ''}, ${customer.CITY || ''}`}
-                    icon={<MapPin size={16} />}
-                  />
-
-                  <InfoBox
-                    label="Customer Type"
-                    value="Individual / Platinum"
-                    icon={<Shield size={16} />}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* ACCOUNTS TAB */}
-            {activeTab === 'accounts' && (
-              <div className="space-y-4">
-                {accounts.map((acc, i) => {
-                  const isAccountActive = acc.STATUS?.toUpperCase() === 'ACTIVE';
-                  return (
-                    <div
-                      key={i}
-                      className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex justify-between items-center hover:border-[#004a99] transition-all cursor-default"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-blue-50 text-[#004a99] rounded-2xl">
-                          <Wallet size={24} />
-                        </div>
+                return (
+                  <div key={acc.ACCOUNT_NUMBER} className="p-5 border border-gray-100 rounded-2xl bg-gray-50/50 flex flex-col justify-between group hover:border-blue-100 transition-all">
+                    
+                    <div>
+                      <div className="flex justify-between items-start mb-4">
                         <div>
-                          <p className="font-bold text-gray-800">
-                            {acc.ACCOUNT_TYPE}
-                          </p>
-                          <p className="text-xs text-gray-400 font-mono italic">
-                            {acc.ACCOUNT_NUMBER}
-                          </p>
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{acc.ACCOUNT_TYPE}</p>
+                          <p className="font-mono text-sm font-semibold text-gray-600 mt-1">{acc.ACCOUNT_NUMBER}</p>
                         </div>
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${acc.STATUS === 'Active' ? 'bg-emerald-100 text-emerald-700' : acc.STATUS === 'Closed' ? 'bg-gray-200 text-gray-600' : 'bg-red-100 text-red-700'}`}>
+                          {acc.STATUS}
+                        </span>
                       </div>
-
-                      <div className="flex items-center gap-6 text-right">
-                        <div>
-                          <p className="text-lg font-bold text-gray-800">
-                            ${Number(acc.BALANCE).toLocaleString()}
-                          </p>
-                          <p className={`text-[10px] font-bold uppercase ${isAccountActive ? 'text-green-500' : 'text-red-500'}`}>
-                            {acc.STATUS}
-                          </p>
-                        </div>
-
-                        {/* GRANULAR ACTION FOR INDIVIDUAL ACCOUNTS */}
-                        <button
+                      
+                      <div className="flex justify-between items-end mb-4">
+                        <p className="text-2xl font-black text-gray-800">${Number(acc.BALANCE).toLocaleString()}</p>
+                        <button 
                           onClick={() => toggleAccountFreeze(acc.ACCOUNT_NUMBER, acc.STATUS)}
-                          className={`p-2.5 rounded-xl transition-all ${
-                            isAccountActive 
-                              ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-50' 
-                              : 'text-cyan-600 bg-cyan-50 hover:bg-cyan-100'
-                          }`}
-                          title={isAccountActive ? "Freeze Account" : "Unfreeze Account"}
+                          disabled={acc.STATUS === 'Closed'}
+                          className={`p-2 rounded-lg transition-all ${acc.STATUS === 'Active' ? 'text-gray-400 hover:text-cyan-600 hover:bg-cyan-100' : acc.STATUS === 'Closed' ? 'text-gray-200 cursor-not-allowed' : 'text-cyan-600 bg-cyan-100 hover:bg-cyan-200'}`}
+                          title={acc.STATUS === 'Active' ? 'Freeze Account' : acc.STATUS === 'Closed' ? 'Closed' : 'Unfreeze Account'}
                         >
-                          <Snowflake size={18} />
+                          {acc.STATUS === 'Closed' ? <Lock size={18} /> : <Snowflake size={18} />}
                         </button>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
 
-            {/* HISTORY TAB */}
-            {activeTab === 'history' && (
-              <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100">
-                {transactions.length > 0 ? (
-                  <div className="space-y-4">
-                    {transactions.map((tx) => (
-                      <div
-                        key={tx.TRANSACTION_ID}
-                        className="p-4 rounded-2xl bg-gray-50"
-                      >
-                        <p className="font-bold text-gray-800">
-                          {tx.TRANSACTION_TYPE}
-                        </p>
-                        <p className="text-gray-700">
-                          ${Number(tx.AMOUNT).toLocaleString()}
-                        </p>
-                        <p className="text-sm text-gray-400">
-                          {new Date(tx.TRANSACTION_TIME).toLocaleString()}
-                        </p>
+                    <div className="pt-4 border-t border-gray-200/60">
+                      <div className="flex justify-between items-center mb-3">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Linked Cards</p>
+                        <button
+                          onClick={() => openIssueCardModal(acc.ACCOUNT_NUMBER)}
+                          disabled={acc.STATUS !== 'Active'}
+                          className="text-[10px] font-bold text-[#004a99] bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          + Issue Card
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-gray-400 py-12 italic">
-                    No recent activity found.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
+                      
+                      <div className="space-y-2">
+                        {accountCards.length > 0 ? accountCards.map(card => (
+                          <div key={card.CARD_ID} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                            
+                            <div className="flex items-center gap-3">
+                              <div className="bg-gray-50 p-2 rounded-lg text-gray-400">
+                                <CreditCard size={16} />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-gray-700 leading-tight">{card.CARD_TYPE}</p>
+                                
+                                {/* REFACTORED CARD UI */}
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <p className="text-[10px] text-gray-400 font-mono">•••• {String(card.CARD_NUMBER).slice(-4)}</p>
+                                  
+                                  {card.CARD_TYPE === 'Credit' && (
+                                    <div className="flex items-center border border-blue-100 rounded overflow-hidden">
+                                      <span className="bg-blue-50 text-[#004a99] text-[9px] font-bold px-1.5 py-0.5">
+                                        Limit: ${card.CARD_LIMIT}
+                                      </span>
+                                      {card.CARD_STATUS === 'Active' && (
+                                        <button 
+                                          onClick={() => openEditLimitModal(card.CARD_ID, card.CARD_LIMIT)}
+                                          className="bg-white hover:bg-[#004a99] text-[#004a99] hover:text-white px-1.5 py-0.5 transition-colors border-l border-blue-100"
+                                          title="Edit Limit"
+                                        >
+                                          <Edit2 size={10} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center">
+                              <span className={`text-[9px] font-bold uppercase px-2 py-1 rounded-md ${card.CARD_STATUS === 'Active' ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
+                                {card.CARD_STATUS}
+                              </span>
+                            </div>
 
-          {/* SIDEBAR */}
-          <div className="space-y-6">
-            <div className="bg-[#004a99] rounded-[2rem] p-6 text-white shadow-lg relative overflow-hidden">
-              <div className="relative z-10">
-                <p className="text-blue-200 text-[10px] font-bold uppercase mb-4 tracking-widest">
-                  Active Debit Card
-                </p>
-                <p className="text-xl font-mono tracking-widest mb-6">
-                  **** **** **** 4092
-                </p>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <p className="text-[10px] text-blue-200 uppercase">
-                      Expiry
-                    </p>
-                    <p className="font-bold">12/28</p>
+                          </div>
+                        )) : (
+                          <p className="text-[10px] text-gray-400 italic">No cards issued to this account.</p>
+                        )}
+                      </div>
+                    </div>
+
                   </div>
-                  <CreditCard size={32} className="opacity-40" />
-                </div>
-              </div>
-              <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl"></div>
+                );
+              }) : (
+                <p className="text-gray-400 text-sm">No accounts found.</p>
+              )}
             </div>
           </div>
+
+          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-6">
+              <Activity className="text-cyan-500" size={20}/> Recent Transactions
+            </h3>
+            <div className="space-y-4">
+              {transactions.length > 0 ? transactions.map((tx) => (
+                <div key={tx.TRANSACTION_ID} className="flex justify-between items-center p-4 rounded-xl border border-gray-50 bg-gray-50/30">
+                  <div>
+                    <p className="font-bold text-sm text-gray-700">{tx.TRANSACTION_TYPE}</p>
+                    <p className="text-[10px] font-bold uppercase text-gray-400 mt-0.5">{new Date(tx.TRANSACTION_TIME).toLocaleString()}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-gray-800">${Number(tx.AMOUNT).toLocaleString()}</p>
+                    <p className={`text-[10px] font-bold uppercase ${tx.STATUS === 'Completed' ? 'text-emerald-500' : 'text-amber-500'}`}>{tx.STATUS}</p>
+                  </div>
+                </div>
+              )) : (
+                <p className="text-gray-400 text-sm">No recent transactions.</p>
+              )}
+            </div>
+          </div>
+
         </div>
       </main>
 
-      {/* BACKDROP */}
-      <div
-        className={`fixed inset-0 bg-black/30 backdrop-blur-sm z-[60] transition-opacity duration-300 ${isEditOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onClick={() => setIsEditOpen(false)}
-      />
+      {/* MODALS */}
+      {isCardModalOpen && (
+        <AddCardModal 
+          accountNumber={selectedAccountForCard}
+          onClose={() => {
+            setIsCardModalOpen(false);
+            setSelectedAccountForCard(null);
+          }}
+          onSuccess={() => fetchDetails()}
+        />
+      )}
 
-      {/* EDIT PANEL */}
-      <div className={`fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[70] transition-transform duration-500 ease-out transform ${isEditOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="h-full flex flex-col">
-          <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-            <h3 className="text-xl font-bold text-gray-800">
-              Edit Personal Details
-            </h3>
-            <button
-              onClick={() => setIsEditOpen(false)}
-              className="p-2 hover:bg-gray-100 rounded-full text-gray-400"
-            >
-              <X size={24} />
-            </button>
-          </div>
+      {isAccountModalOpen && (
+        <AddAccountForCustomer 
+          customerId={customer.CUSTOMER_ID}
+          customerName={`${customer.FIRST_NAME} ${customer.LAST_NAME}`}
+          onClose={() => setIsAccountModalOpen(false)}
+          onSuccess={() => fetchDetails()} 
+        />
+      )}
 
-          <form
-            onSubmit={handleUpdate}
-            className="flex-1 overflow-y-auto p-8 space-y-6"
-          >
-            <EditInput
-              label="Full Name"
-              value={editData.name}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  name: e.target.value
-                })
-              }
-            />
-
-            <EditInput
-              label="Email Address"
-              type="email"
-              value={editData.email}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  email: e.target.value
-                })
-              }
-            />
-
-            <EditInput
-              label="Phone Number"
-              value={editData.phone}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  phone: e.target.value
-                })
-              }
-            />
-
-            <EditInput
-              label="Home Address"
-              value={editData.address}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  address: e.target.value
-                })
-              }
-            />
-          </form>
-
-          <div className="p-6 border-t border-gray-100 flex gap-4">
-            <button
-              onClick={handleUpdate}
-              className="flex-1 bg-[#004a99] text-white font-bold py-4 rounded-2xl shadow-lg hover:bg-[#003d7a] flex items-center justify-center gap-2"
-            >
-              <Save size={18} />
-              Save Changes
-            </button>
-
-            <button
-              onClick={() => setIsEditOpen(false)}
-              className="px-6 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl hover:bg-gray-200"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
+      {isEditLimitModalOpen && (
+        <EditLimitModal 
+          cardId={limitModalData.cardId}
+          currentLimit={limitModalData.currentLimit}
+          onClose={() => {
+            setIsEditLimitModalOpen(false);
+            setLimitModalData({ cardId: null, currentLimit: 0 });
+          }}
+          onSuccess={() => fetchDetails()} 
+        />
+      )}
+      
     </div>
   );
 }
 
-// UI HELPERS
-function TabButton({ active, label, icon, onClick }) {
+function InfoRow({ icon, label, value }) {
   return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 py-4 px-2 border-b-2 font-bold text-sm transition-all ${
-        active
-          ? 'border-[#004a99] text-[#004a99]'
-          : 'border-transparent text-gray-400 hover:text-gray-600'
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function InfoBox({ label, value, icon }) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="mt-1 p-2 bg-gray-50 rounded-lg text-gray-400">
-        {icon}
-      </div>
+    <div className="flex items-center gap-3">
+      <div className="text-[#a37e2c] bg-amber-50 p-2 rounded-lg">{icon}</div>
       <div>
-        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight mb-0.5">
-          {label}
-        </p>
-        <p className="text-sm font-semibold text-gray-700">
-          {value || 'N/A'}
-        </p>
+        <p className="text-[10px] font-bold uppercase text-gray-400">{label}</p>
+        <p className="text-sm font-bold text-gray-700">{value}</p>
       </div>
     </div>
   );
 }
-
-function EditInput({ label, ...props }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[10px] text-gray-400 font-bold uppercase tracking-widest ml-1">
-        {label}
-      </label>
-      <input
-        className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold text-gray-700 transition-all"
-        {...props}
-      />
-    </div>
-  );
-}
-

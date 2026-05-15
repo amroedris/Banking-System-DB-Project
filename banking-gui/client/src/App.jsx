@@ -13,10 +13,9 @@ import AccountPage from './pages/User/AccountPage';
 import StaffDashboard from './pages/Staff/AdminDashboard';
 import UserDirectory from './pages/Staff/UserDirectory';
 import CustomerDetails from './pages/Staff/CustomerDetails';
-import AddAccount from './pages/Staff/AddAccount';
+import AddUser from './pages/Staff/AddUser';
 import ApprovalQueue from './pages/Staff/ApprovalQueue';
 import TransactionLog from './pages/Staff/TransactionLog';
-import AuditLogs from './pages/Staff/AuditLogs';
 import StaffDirectory from './pages/Staff/StaffDirectory';
 import AddStaff from './pages/Staff/AddStaff';
 
@@ -39,10 +38,9 @@ export default function App() {
         <Route path="/account" element={<AccountPage />} />
         <Route path="/user-directory" element={<UserDirectory />} />
         <Route path="/customer/:id" element={<CustomerDetails />} />
-        <Route path="/add-account" element={<AddAccount />} />
+        <Route path="/add-user" element={<AddUser />} />
         <Route path="/approval-queue" element={<ApprovalQueue />} />
         <Route path="/transaction-log" element={<TransactionLog />} />
-        <Route path="/audit-logs" element={<AuditLogs />} />
         <Route path="/staff-directory" element={<StaffDirectory />} />
         <Route path="/add-staff" element={<AddStaff />} />
       </Routes>
