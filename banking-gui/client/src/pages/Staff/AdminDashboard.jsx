@@ -6,7 +6,7 @@ import {
   Search, History, Activity, LogOut
 } from 'lucide-react';
 import { stripJobPrefix } from '../../utils/jobMappings.js';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -60,7 +60,11 @@ const fetchDashboardData = async () => {
       {/* TOP NAVIGATION BAR */}
       <nav className="bg-white border-b border-gray-100 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
         <div className="flex items-center gap-4">
-          <img src={euiLogo} alt="EUI Logo" className="h-12 object-contain" />
+               <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <div className="h-8 w-[1px] bg-gray-200 mx-2"></div>
           <div>
             <h1 className="text-lg font-bold text-[#004a99]">Staff Portal</h1>

@@ -5,7 +5,7 @@ import {
   ArrowLeft, UserPlus, Mail, Briefcase, Lock, Building2,
   ShieldCheck, CheckCircle, AlertCircle 
 } from 'lucide-react';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 import {
   validateEgyptianPhone, validatePhones,
   validateEmail, validateName, validateUsername,
@@ -232,7 +232,11 @@ const updatePhone = (index, value) => {
           <button onClick={() => navigate('/staff-directory')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-all">
             <ArrowLeft size={20} />
           </button>
-          <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
           <h1 className="text-lg font-bold text-[#004a99]">New Staff Onboarding</h1>
         </div>

@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const bcrypt = require("bcrypt");
 const oracledb = require("oracledb");
 const { initDatabase } = require("./database-init");
 require("dotenv").config();
@@ -141,25 +142,56 @@ app.post("/login", async (req, res) => {
     connection = await oracledb.getConnection(dbConfig);
 
     const result = await connection.execute(
-      `SELECT c.customer_id,
-              c.first_name,
-              c.last_name,
-              NVL(SUM(a.balance), 0) AS total_balance
+      `SELECT
+          c.customer_id,
+          c.first_name,
+          c.last_name,
+          c.password,
+          NVL(SUM(a.balance), 0) AS total_balance
        FROM customer c
-       LEFT JOIN customer_account ca ON c.customer_id = ca.customer_id
-       LEFT JOIN account a ON ca.account_number = a.account_number
+       LEFT JOIN customer_account ca
+         ON c.customer_id = ca.customer_id
+       LEFT JOIN account a
+         ON ca.account_number = a.account_number
        WHERE c.username = :us
-       AND c.password = :pass
-       GROUP BY c.customer_id, c.first_name, c.last_name`,
-      [us, pass],
+       GROUP BY
+         c.customer_id,
+         c.first_name,
+         c.last_name,
+         c.password`,
+      { us },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    if (result.rows.length > 0) {
-      res.json({ success: true, user: result.rows[0] });
-    } else {
-      res.json({ success: false, message: "Invalid credentials" });
+    if (result.rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Invalid credentials"
+      });
     }
+
+    const user = result.rows[0];
+
+    // Compare entered password with hash
+    const passwordMatch = await bcrypt.compare(
+      pass,
+      user.PASSWORD
+    );
+
+    if (!passwordMatch) {
+      return res.json({
+        success: false,
+        message: "Invalid credentials"
+      });
+    }
+
+    // Remove password before sending response
+    delete user.PASSWORD;
+
+    res.json({
+      success: true,
+      user
+    });
 
   } catch (err) {
     console.error(err);
@@ -988,6 +1020,7 @@ app.put("/customer-password/:customerId", async (req, res) => {
 
     connection = await oracledb.getConnection(dbConfig);
 
+    // Get stored hashed password
     const check = await connection.execute(
       `SELECT password
        FROM customer
@@ -1004,20 +1037,33 @@ app.put("/customer-password/:customerId", async (req, res) => {
       });
     }
 
-    if (
-      check.rows[0].PASSWORD !== currentPassword
-    ) {
+    const storedHash = check.rows[0].PASSWORD;
+
+    // Compare entered current password with stored hash
+    const passwordMatches = await bcrypt.compare(
+      currentPassword,
+      storedHash
+    );
+
+    if (!passwordMatches) {
       return res.status(400).json({
         message: "Current password is incorrect"
       });
     }
 
+    // Hash the new password
+    const hashedNewPassword = await bcrypt.hash(
+      newPassword,
+      10
+    );
+
+    // Save hashed password
     await connection.execute(
       `UPDATE customer
        SET password = :newPassword
        WHERE customer_id = :id`,
       {
-        newPassword,
+        newPassword: hashedNewPassword,
         id: customerId
       },
       { autoCommit: true }
@@ -2420,29 +2466,34 @@ app.post("/staff/customers", async (req, res) => {
 
     // 2. Insert into main CUSTOMER table 
     // (Note: TO_DATE is used to safely convert the React HTML date string for Oracle)
-    await connection.execute(
-      `INSERT INTO customer (
-        customer_id, first_name, middle_name, last_name, email, street, city, governorate,
-        national_id, dob, username, password
-      ) VALUES (
-        :customerId, :firstName, :middleName, :lastName, :email, :street, :city, :governorate,
-        :nationalId, TO_DATE(:dob, 'YYYY-MM-DD'), :username, :password
-      )`,
-      {
-        customerId: newCustomerId,
-        firstName: customerData.firstName,
-        middleName: customerData.middleName || null,
-        lastName: customerData.lastName,
-        email: customerData.email,
-        street: customerData.street,
-        city: customerData.city,
-        governorate: customerData.governorate,
-        nationalId: customerData.nationalId,
-        dob: customerData.dob,
-        username: customerData.username,
-        password: customerData.password,
-      }
-    );
+const hashedPassword = await bcrypt.hash(customerData.password, 10);
+
+await connection.execute(
+  `INSERT INTO customer (
+    customer_id, first_name, middle_name, last_name,
+    email, street, city, governorate,
+    national_id, dob, username, password
+  ) VALUES (
+    :customerId, :firstName, :middleName, :lastName,
+    :email, :street, :city, :governorate,
+    :nationalId, TO_DATE(:dob, 'YYYY-MM-DD'),
+    :username, :password
+  )`,
+  {
+    customerId: newCustomerId,
+    firstName: customerData.firstName,
+    middleName: customerData.middleName || null,
+    lastName: customerData.lastName,
+    email: customerData.email,
+    street: customerData.street,
+    city: customerData.city,
+    governorate: customerData.governorate,
+    nationalId: customerData.nationalId,
+    dob: customerData.dob,
+    username: customerData.username,
+    password: hashedPassword
+  }
+);
 
     // 3. Insert into CUSTOMER_PHONE table if they provided phone numbers
     if (customerData.phones && Array.isArray(customerData.phones)) {

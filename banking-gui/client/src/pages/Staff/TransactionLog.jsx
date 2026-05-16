@@ -6,7 +6,7 @@ import {
   CheckCircle, XCircle, Clock
 } from 'lucide-react';
 import axios from 'axios';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function TransactionLogs() {
   const navigate = useNavigate();
@@ -48,7 +48,11 @@ export default function TransactionLogs() {
           <button onClick={() => navigate('/staff-dashboard')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500">
             <ArrowLeft size={20} />
           </button>
-          <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
           <h1 className="text-lg font-bold text-[#004a99]">Transaction Logs</h1>
         </div>

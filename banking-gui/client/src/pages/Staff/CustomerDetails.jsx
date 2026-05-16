@@ -5,7 +5,7 @@ import {
   ArrowLeft, Mail, Phone, MapPin, 
   CreditCard, Activity, Snowflake, Plus, Lock, Landmark, Edit2, Trash2
 } from 'lucide-react';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 import AddCardModal from './AddCardModal';
 import AddAccountForCustomer from './AddAccountForCustomer'; 
 import EditLimitModal from './EditLimitModal';
@@ -98,7 +98,11 @@ export default function CustomerDetails() {
         <button onClick={() => navigate('/user-directory')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500">
           <ArrowLeft size={20} />
         </button>
-        <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+                    <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
         <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
         <h1 className="text-lg font-bold text-[#004a99]">Customer Profile</h1>
       </nav>

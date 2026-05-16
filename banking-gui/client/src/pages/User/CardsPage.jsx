@@ -145,7 +145,6 @@ export default function CardsPage() {
       limit: 'No limit',
       perks: [
         'Linked directly to your account balance',
-        'No credit checks required',
         'Instant approval after staff review',
       ],
     },
@@ -154,7 +153,6 @@ export default function CardsPage() {
       limit: 'EGP 50,000',
       perks: [
         'Up to EGP 50,000 revolving credit limit',
-        'Buy now, pay later flexibility',
         'Subject to credit approval by staff',
       ],
     },
@@ -166,8 +164,12 @@ export default function CardsPage() {
       {/* HEADER */}
       <header className="bg-white border-b border-gray-200 pt-6 pb-6 px-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-4">
-            <img src={euiLogo} alt="EUI Logo" className="h-12 w-12" />
+          <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 text-center md:text-left">
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
             <h1 className="text-xl font-black text-[#004a99]">My Cards</h1>
           </div>
 
@@ -406,7 +408,7 @@ export default function CardsPage() {
                   <p className="text-white/70 text-sm">Choose your card type below</p>
                 </div>
 
-                <div className="p-8">
+                <div className="p-8 overflow-y-auto flex-1">
                   {/* Card Type Toggle */}
                   <div className="flex gap-3 mb-6">
                     {['Debit', 'Credit'].map(type => (

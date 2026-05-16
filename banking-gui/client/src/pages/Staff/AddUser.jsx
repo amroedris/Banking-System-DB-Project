@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, UserPlus, Shield, Save, AlertCircle, CheckCircle, Landmark, MapPin, Key, Plus, Trash2 } from 'lucide-react';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 import {
   validateEgyptianPhone, validatePhones,
   validateEmail, validateName, validateUsername,
@@ -148,7 +148,11 @@ export default function AddUser() {
         <button onClick={() => navigate('/staff-dashboard')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500">
           <ArrowLeft size={20} />
         </button>
-        <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
         <h1 className="text-lg font-bold text-[#004a99]">New Customer Onboarding</h1>
       </nav>
 

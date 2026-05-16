@@ -5,7 +5,7 @@ import {
   Mail, Briefcase, Phone, Edit, Trash2, Lock, Eye, EyeOff, X, Save, AlertTriangle, Plus, Trash2Icon, AlertCircle, Building2, Filter
 } from 'lucide-react';
 import axios from 'axios';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 import { validateEgyptianPhone, validatePhones, validateEmail, validateName, validateSalary } from '../../utils/validation.js';
 import { getJobDropdownOptions, stripJobPrefix, getPrefixForDepartment } from '../../utils/jobMappings.js';
 
@@ -320,7 +320,11 @@ export default function StaffManagement() {
       <nav className="bg-white border-b border-gray-100 px-8 py-4 flex justify-between items-center sticky top-0 z-40">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/staff-dashboard')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500"><ArrowLeft size={20} /></button>
-          <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <h1 className="text-lg font-bold text-[#004a99]">Team Management</h1>
         </div>
       </nav>

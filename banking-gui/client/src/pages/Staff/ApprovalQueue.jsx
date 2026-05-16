@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, X, Lock, Landmark, Clock, CreditCard } from 'lucide-react';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function ApprovalQueue() {
   const navigate = useNavigate();
@@ -76,7 +76,11 @@ const handleAction = async (id, action, type) => {
           <button onClick={() => navigate('/staff-dashboard')} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500">
             <ArrowLeft size={20} />
           </button>
-          <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
           <h1 className="text-lg font-bold text-[#004a99]">Approval Desk</h1>
         </div>

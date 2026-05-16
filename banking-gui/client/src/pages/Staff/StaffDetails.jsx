@@ -5,7 +5,7 @@ import {
   Edit, Save, X, AlertCircle, Users, Plus, Trash2, MapPin, Award, AlertTriangle
 } from 'lucide-react';
 import axios from 'axios';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 import { validateEgyptianPhone, validatePhones, validateEmail, validateName, validateSalary } from '../../utils/validation.js';
 import { getJobDropdownOptions, stripJobPrefix, getPrefixForDepartment } from '../../utils/jobMappings.js';
 
@@ -328,7 +328,11 @@ export default function StaffDetails() {
           <button onClick={() => navigate('/staff-directory')} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-all">
             <ArrowLeft size={20} />
           </button>
-          <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+                      <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
           <h1 className="text-lg font-bold text-[#004a99]">Staff Profile</h1>
         </div>

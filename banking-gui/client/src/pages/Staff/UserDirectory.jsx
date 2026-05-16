@@ -5,7 +5,7 @@ import {
   Search, Snowflake, User, ArrowLeft, 
   CheckCircle, AlertCircle, Eye, Lock
 } from 'lucide-react';
-import euiLogo from '../../assets/eui-logo.png';
+import euiLogo from '../../assets/EUI-Cropped.jpg';
 
 export default function UserDirectory() {
   const navigate = useNavigate();
@@ -70,7 +70,11 @@ export default function UserDirectory() {
           <button onClick={() => navigate('/staff-dashboard')} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500">
             <ArrowLeft size={20} />
           </button>
-          <img src={euiLogo} alt="EUI Logo" className="h-10 object-contain" />
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
           <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
           <h1 className="text-lg font-bold text-[#004a99]">Customer Management</h1>
         </div>

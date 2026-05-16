@@ -156,8 +156,12 @@ useEffect(() => {
       
       <header className="bg-white border-b border-gray-200 pt-6 pb-6 px-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-4 md:gap-6">
-            <img src={euiLogo} alt="EUI Logo" className="h-16 w-16" />
+          <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 text-center md:text-left">
+            <img 
+              src={euiLogo} 
+              alt="EUI Logo" 
+              className="h-20 w-20" 
+            />
             <div className="h-10 w-px bg-gray-200 hidden md:block"></div>
             <div>
               <h1 className="text-2xl font-black text-[#004a99] tracking-tight">Loan Center</h1>
