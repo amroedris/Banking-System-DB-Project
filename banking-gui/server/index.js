@@ -241,24 +241,21 @@ app.get("/recent-transactions/:customerId", async (req, res) => {
     connection = await oracledb.getConnection(dbConfig);
 
     const result = await connection.execute(
-      `SELECT *
-       FROM (
-            SELECT
-                bt.transaction_id,
-                bt.transaction_type,
-                bt.amount,
-                bt.transaction_time,
-                bt.sender_account_number,
-                bt.receiver_account_number,
-                bt.status
-            FROM bank_transaction bt
-            JOIN customer_account ca
-              ON bt.sender_account_number = ca.account_number
-              OR bt.receiver_account_number = ca.account_number
-            WHERE ca.customer_id = :id
-            ORDER BY bt.transaction_time DESC
-       )
-       WHERE ROWNUM <= 5`,
+      `SELECT * FROM (
+        SELECT DISTINCT
+            bt.transaction_id,
+            bt.transaction_type,
+            bt.amount,
+            bt.transaction_time,
+            bt.sender_account_number,
+            bt.receiver_account_number,
+            bt.status
+        FROM bank_transaction bt
+        JOIN customer_account ca
+          ON (bt.sender_account_number = ca.account_number OR bt.receiver_account_number = ca.account_number)
+        WHERE ca.customer_id = :id
+        ORDER BY bt.transaction_time DESC
+      ) WHERE ROWNUM <= 5`,
       [customerId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );

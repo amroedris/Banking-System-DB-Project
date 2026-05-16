@@ -8,7 +8,7 @@ export default function ApprovalQueue() {
   const navigate = useNavigate();
   
   const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
-  const isManager = staffData.JOB_ID === 1 || staffData.JOB_ID === 3 || staffData.JOB_ID === 4;
+  const isManager = staffData.JOB_ID === 1 || staffData.JOB_ID === 2 || staffData.JOB_ID === 4;
 
   if (!isManager) {
     return (
@@ -19,7 +19,7 @@ export default function ApprovalQueue() {
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">Access Denied</h2>
           <p className="text-gray-500 mb-8">
-            Only <b>Managers</b> can access the Approval Queue.
+            Only <b>Retail Banking Staff</b> can access the Approval Queue.
           </p>
           <button 
             onClick={() => navigate('/staff-dashboard')} 
