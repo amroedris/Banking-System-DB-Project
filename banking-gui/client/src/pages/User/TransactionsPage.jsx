@@ -141,25 +141,31 @@ export default function TransactionHistoryPage() {
                   }}
                 >
                   {accounts.map((acc) => (
-                    <option
-                      key={acc.ACCOUNT_NUMBER}
-                      value={acc.ACCOUNT_NUMBER}
-                      className="text-gray-900 font-medium"
-                    >
-                      {acc.ACCOUNT_TYPE} (•••• {String(acc.ACCOUNT_NUMBER).slice(-4)})
-                    </option>
+                      <option
+    key={acc.ACCOUNT_NUMBER}
+    value={acc.ACCOUNT_NUMBER}
+    className="text-gray-900 font-medium"
+  >
+    {acc.ACCOUNT_TYPE} (•••• {String(acc.ACCOUNT_NUMBER).slice(-4)}){acc.STATUS === 'Closed' ? ' — Closed' : ''}
+  </option>
                   ))}
                 </select>
               </div>
             </div>
 
             {/* Balance */}
-            <div className="bg-white/10 p-4 rounded-2xl border border-white/20 backdrop-blur-sm text-right w-full md:w-auto">
-              <p className="text-blue-200 text-sm font-bold uppercase tracking-wider mb-1">Available Balance</p>
-              <p className="text-3xl font-black">
-                ${Number(activeAccount?.BALANCE || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </p>
-            </div>
+           {/* Balance */}
+<div className="bg-white/10 p-4 rounded-2xl border border-white/20 backdrop-blur-sm text-right w-full md:w-auto">
+  <p className="text-blue-200 text-sm font-bold uppercase tracking-wider mb-1">Available Balance</p>
+  <p className="text-3xl font-black">
+    ${Number(activeAccount?.BALANCE || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+  </p>
+  {activeAccount?.STATUS === 'Closed' && (
+    <p className="text-xs font-bold text-red-300 uppercase tracking-wider mt-2 flex items-center justify-end gap-1">
+      ⚠ This account has been closed
+    </p>
+  )}
+</div>
           </div>
         </div>
 

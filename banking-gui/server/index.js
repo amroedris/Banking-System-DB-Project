@@ -546,7 +546,7 @@ app.get("/loans/:customerId", async (req, res) => {
       `SELECT *
       FROM loan
       WHERE customer_id = :id
-      AND loan_state = 'ACTIVE' AND status = 'Approved'
+      AND loan_state = 'ACTIVE' AND status IN ('Approved', 'Pending')
       ORDER BY start_date DESC`,
       [req.params.customerId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -2102,10 +2102,31 @@ app.get("/staff/customer/:id", async (req, res) => {
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
+    // Add this query inside the route, alongside the existing ones:
+const loansResult = await connection.execute(
+  `SELECT
+    loan_id,
+    loan_amount,
+    interest_rate,
+    due_date,
+    loan_term,
+    monthly_payment,
+    total_paid_off,
+    start_date
+   FROM loan
+   WHERE customer_id = :id
+   AND loan_state = 'ACTIVE'
+   AND status = 'Approved'
+   ORDER BY start_date DESC`,
+  { id: customerId },
+  { outFormat: oracledb.OUT_FORMAT_OBJECT }
+);
+
     res.json({
       customer: customerResult.rows[0],
       accounts: accountsResult.rows,
-      transactions: transactionsResult.rows
+      transactions: transactionsResult.rows,
+      loans: loansResult.rows
     });
 
   } catch (err) {
@@ -2120,26 +2141,30 @@ app.get("/staff/customers", async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
-    const result = await connection.execute(
-      `
-      SELECT
-        c.customer_id,
-        c.first_name,
-        c.last_name,
-        c.national_id,
-        NVL(SUM(a.balance), 0) AS balance,
-        UPPER(NVL(MAX(a.status), 'Inactive')) AS status
-      FROM customer c
-      LEFT JOIN customer_account ca
-        ON c.customer_id = ca.customer_id
-      LEFT JOIN account a
-        ON ca.account_number = a.account_number
-      GROUP BY c.customer_id, c.first_name, c.last_name, c.national_id
-      ORDER BY c.customer_id
-      `,
-      [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
+   const result = await connection.execute(
+  `
+  SELECT
+    c.customer_id,
+    c.first_name,
+    c.last_name,
+    c.national_id,
+    NVL(SUM(a.balance), 0) AS balance,
+    UPPER(
+      CASE
+        WHEN MAX(CASE WHEN a.status = 'Active'   THEN 2 ELSE 0 END) = 2 THEN 'Active'
+        WHEN MAX(CASE WHEN a.status = 'Inactive' THEN 1 ELSE 0 END) = 1 THEN 'Inactive'
+        ELSE 'Closed'
+      END
+    ) AS status
+  FROM customer c
+  LEFT JOIN customer_account ca ON c.customer_id = ca.customer_id
+  LEFT JOIN account a ON ca.account_number = a.account_number
+  GROUP BY c.customer_id, c.first_name, c.last_name, c.national_id
+  ORDER BY c.customer_id
+  `,
+  [],
+  { outFormat: oracledb.OUT_FORMAT_OBJECT }
+);
 
     res.json(result.rows);
   } catch (err) {

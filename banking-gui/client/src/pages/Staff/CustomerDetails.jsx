@@ -20,6 +20,7 @@ export default function CustomerDetails() {
   const [cards, setCards] = useState([]); 
   const [loading, setLoading] = useState(true);
 
+  const [loans, setLoans] = useState([]);
   // MODAL STATES
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [selectedAccountForCard, setSelectedAccountForCard] = useState(null);
@@ -48,6 +49,7 @@ export default function CustomerDetails() {
       setAccounts(profileRes.data.accounts || []);
       setTransactions(profileRes.data.transactions || []);
       setCards(cardsRes.data || []);
+      setLoans(profileRes.data.loans || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -187,6 +189,15 @@ export default function CustomerDetails() {
                             <Snowflake size={18} />
                           </button>
 
+                            <button
+    onClick={() => closeAccount(acc.ACCOUNT_NUMBER)}
+    disabled={Number(acc.BALANCE) > 0}
+    className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+    title={Number(acc.BALANCE) > 0 ? "Clear balance before closing" : "Close Account"}
+  >
+    <Trash2 size={18} />
+  </button>
+
               
                         </div>
                       </div>
@@ -272,6 +283,45 @@ export default function CustomerDetails() {
               )}
             </div>
           </div>
+          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100">
+  <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-6">
+    <Landmark className="text-[#004a99]" size={20}/> Active Loans
+  </h3>
+  <div className="space-y-4">
+    {loans.length > 0 ? loans.map((loan) => {
+      const totalWithInterest = Number(loan.LOAN_AMOUNT) + (Number(loan.LOAN_AMOUNT) * Number(loan.INTEREST_RATE) / 100);
+      const paid = Number(loan.TOTAL_PAID_OFF || 0);
+      const remaining = totalWithInterest - paid;
+      const progress = totalWithInterest > 0 ? (paid / totalWithInterest) * 100 : 0;
+
+      return (
+        <div key={loan.LOAN_ID} className="p-5 border border-gray-100 rounded-2xl bg-gray-50/50">
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Loan #{loan.LOAN_ID}</p>
+              <p className="text-lg font-black text-gray-800">${Number(loan.LOAN_AMOUNT).toLocaleString()}</p>
+              <p className="text-xs text-gray-500">{loan.LOAN_TERM} months · {loan.INTEREST_RATE}% interest</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-bold text-gray-400 uppercase">Remaining</p>
+              <p className="text-lg font-bold text-[#004a99]">${remaining.toFixed(2)}</p>
+              <p className="text-xs text-gray-400">Due: {new Date(loan.DUE_DATE).toLocaleDateString()}</p>
+            </div>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div className="bg-[#004a99] h-2 rounded-full" style={{ width: `${progress}%` }}></div>
+          </div>
+          <div className="flex justify-between text-[10px] text-gray-400 font-bold mt-1">
+            <span>Paid: ${paid.toFixed(2)}</span>
+            <span>Total: ${totalWithInterest.toFixed(2)}</span>
+          </div>
+        </div>
+      );
+    }) : (
+      <p className="text-gray-400 text-sm">No active loans.</p>
+    )}
+  </div>
+</div>
 
         </div>
       </main>

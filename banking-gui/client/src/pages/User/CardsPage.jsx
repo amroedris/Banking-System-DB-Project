@@ -145,6 +145,7 @@ export default function CardsPage() {
       limit: 'No limit',
       perks: [
         'Linked directly to your account balance',
+        'No credit checks required',
         'Instant approval after staff review',
       ],
     },
@@ -153,6 +154,7 @@ export default function CardsPage() {
       limit: 'EGP 50,000',
       perks: [
         'Up to EGP 50,000 revolving credit limit',
+        'Buy now, pay later flexibility',
         'Subject to credit approval by staff',
       ],
     },
@@ -429,7 +431,7 @@ export default function CardsPage() {
                   </div>
 
                   {/* Live Card Preview */}
-                  <div className={`w-full aspect-[1.586/1] rounded-2xl bg-gradient-to-br ${cardInfo[applyCardType].color} p-6 text-white mb-6 shadow-lg transition-all duration-300`}>
+                 <div className={`w-3/4 mx-auto aspect-[1.586/1] rounded-2xl bg-gradient-to-br ${cardInfo[applyCardType].color} p-5 text-white mb-6 shadow-lg transition-all duration-300`}>
                     <div className="h-full flex flex-col justify-between">
                       <div className="flex justify-between items-start">
                         <p className="font-black italic text-lg">EUI BANK</p>
