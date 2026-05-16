@@ -1097,6 +1097,7 @@ app.post("/staff-login", async (req, res) => {
 
     connection = await oracledb.getConnection(dbConfig);
 
+    // Get user by username only
     const result = await connection.execute(
       `
       SELECT
@@ -1108,31 +1109,49 @@ app.post("/staff-login", async (req, res) => {
         e.job_id,
         e.dep_id,
         e.username,
+        e.password,
         j.job_title
       FROM employees e
       LEFT JOIN jobs j ON e.job_id = j.job_id
       WHERE e.username = :us
-      AND e.password = :pass
       `,
-      { us, pass },
+      { us },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    if (result.rows.length > 0) {
+    if (result.rows.length === 0) {
 
-      res.json({
-        success: true,
-        user: result.rows[0]   // IMPORTANT (match frontend)
-      });
-
-    } else {
-
-      res.json({
+      return res.json({
         success: false,
         message: "Invalid staff credentials"
       });
 
     }
+
+    const user = result.rows[0];
+
+    // Compare entered password with stored hash
+    const passwordMatches = await bcrypt.compare(
+      pass,
+      user.PASSWORD
+    );
+
+    if (!passwordMatches) {
+
+      return res.json({
+        success: false,
+        message: "Invalid staff credentials"
+      });
+
+    }
+
+    // Remove password before sending to frontend
+    delete user.PASSWORD;
+
+    res.json({
+      success: true,
+      user
+    });
 
   } catch (err) {
 
@@ -1685,6 +1704,8 @@ app.post("/staff", async (req, res) => {
       departmentId = 10;
     }
 
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     // 5. Insert the employee
     await connection.execute(
       `INSERT INTO employees (
@@ -1704,7 +1725,7 @@ app.post("/staff", async (req, res) => {
         email,
         salary,
         username,
-        password,
+        password: hashedPassword,
         jobId: JOB_ID,
         depId: departmentId,
         supervisorId: supervisorId || null
@@ -1772,19 +1793,20 @@ app.put("/staff/:employeeId", async (req, res) => {
 
     if (depId !== undefined && depId !== null && depId !== '') {
       // Include dep_id in the update
+            const hashedPassword = await bcrypt.hash(password, 10);
       if (password && String(password).trim() !== '') {
         updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.dep_id = :depId, e.password = :password WHERE e.employee_id = :employeeId`;
-        params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), password, employeeId };
+        params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), password: hashedPassword , employeeId };
       } else {
         updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.dep_id = :depId WHERE e.employee_id = :employeeId`;
         params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), employeeId };
       }
     } else {
       // No department change
+      const hashedPassword = await bcrypt.hash(password, 10);
       if (password && String(password).trim() !== '') {
         updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.password = :password WHERE e.employee_id = :employeeId`;
-        params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId };
-        params.password = password;
+        params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId, password: hashedPassword };
       } else {
         updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary WHERE e.employee_id = :employeeId`;
         params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId };
