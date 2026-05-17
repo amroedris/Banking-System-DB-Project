@@ -33,28 +33,28 @@ INSERT INTO Customer (Customer_ID, First_name, Middle_Name, Last_name, DOB, Stre
 VALUES (3, 'Omar', 'Tarek', 'Sayed', TO_DATE('1978-02-10', 'YYYY-MM-DD'), 'Ramses St', 'Downtown', 'Cairo', '27802100100789', 'omar@email.com', 'omar_sayed', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 INSERT INTO Customer (Customer_ID, First_name, Middle_Name, Last_name, DOB, Street, City, Governorate, National_ID, Email, Username, Password)
-VALUES (7, 'Amr', 'Customer', 'Edris', TO_DATE('2000-01-01', 'YYYY-MM-DD'), 'Academy St', 'New Cairo', 'Cairo', '30001010100777', 'amr@email.com', 'amr_customer', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
+VALUES (4, 'Amr', 'Customer', 'Edris', TO_DATE('2000-01-01', 'YYYY-MM-DD'), 'Academy St', 'New Cairo', 'Cairo', '30001010100777', 'amr@email.com', 'amr_customer', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 -- 2. EMPLOYEES (depends on Branch, Jobs, Department)
 
 -- RB_Department_Manager (JOB_ID=1) - oversees tellers and reports to Branch Manager
 INSERT INTO Employees (Employee_ID, First_Name, Middle_Name, Last_Name, Salary, Email, Hire_Date, Branch_ID, Job_ID, Dep_ID, Supervisor_ID, Username, Password)
-VALUES (1001, 'Mohamed', 'Sayed', 'Kamal', 25000.00, 'm.kamal@bank.com', TO_DATE('2015-01-01', 'YYYY-MM-DD'), 101, 1, 10, NULL, 'mkamal', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
+VALUES (1, 'Mohamed', 'Sayed', 'Kamal', 25000.00, 'm.kamal@bank.com', TO_DATE('2015-01-01', 'YYYY-MM-DD'), 101, 1, 10, NULL, 'mkamal', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 -- RB_Teller (JOB_ID=2) - reports to department manager
 INSERT INTO Employees (Employee_ID, First_Name, Middle_Name, Last_Name, Salary, Email, Hire_Date, Branch_ID, Job_ID, Dep_ID, Supervisor_ID, Username, Password)
-VALUES (1002, 'Noha', 'Adel', 'Samir', 7000.00, 'n.adel@bank.com', TO_DATE('2020-03-15', 'YYYY-MM-DD'), 101, 2, 10, 1001, 'nsamir', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
+VALUES (2, 'Noha', 'Adel', 'Samir', 7000.00, 'n.adel@bank.com', TO_DATE('2020-03-15', 'YYYY-MM-DD'), 101, 2, 10, 1, 'nsamir', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 -- IT_System_Administrator (JOB_ID=3) - super admin / god view
 INSERT INTO Employees (Employee_ID, First_Name, Middle_Name, Last_Name, Salary, Email, Hire_Date, Branch_ID, Job_ID, Dep_ID, Supervisor_ID, Username, Password)
-VALUES (777, 'Amr', 'Admin', 'Edris', 45000.00, 'amr.admin@bank.com', TO_DATE('2026-01-01', 'YYYY-MM-DD'), 101, 3, 20, NULL, 'amr_admin', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
+VALUES (3, 'Amr', 'Admin', 'Edris', 45000.00, 'amr.admin@bank.com', TO_DATE('2026-01-01', 'YYYY-MM-DD'), 101, 3, 20, NULL, 'amr_admin', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 -- RB_Branch_Manager (JOB_ID=4) - branch-level scope manager
 INSERT INTO Employees (Employee_ID, First_Name, Middle_Name, Last_Name, Salary, Email, Hire_Date, Branch_ID, Job_ID, Dep_ID, Supervisor_ID, Username, Password)
-VALUES (1003, 'Heba', 'Tarek', 'Fouad', 35000.00, 'h.fouad@bank.com', TO_DATE('2018-06-01', 'YYYY-MM-DD'), 101, 4, 10, NULL, 'hfouad', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
+VALUES (4, 'Heba', 'Tarek', 'Fouad', 35000.00, 'h.fouad@bank.com', TO_DATE('2018-06-01', 'YYYY-MM-DD'), 101, 4, 10, NULL, 'hfouad', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 INSERT INTO Employees (Employee_ID, First_Name, Middle_Name, Last_Name, Salary, Email, Hire_Date, Branch_ID, Job_ID, Dep_ID, Supervisor_ID, Username, Password)
-VALUES (1004, 'joe', 'Tarek', 'Fouad', 35000.00, 'j.fouad@bank.com', TO_DATE('2018-06-01', 'YYYY-MM-DD'), 102, 4, 10, NULL, 'jfouad', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
+VALUES (5, 'joe', 'Tarek', 'Fouad', 35000.00, 'j.fouad@bank.com', TO_DATE('2018-06-01', 'YYYY-MM-DD'), 102, 4, 10, NULL, 'jfouad', '$2b$10$bLFttGKghDfd8eFoo8batOAKGdLA8YwgxFmx2hl.q5OeztTFw8iM6');
 
 
 -- 3. ACCOUNTS (depends on Branch)
@@ -79,7 +79,7 @@ VALUES (70001, 'Savings', 50000.00, 'Active', 101);
 INSERT INTO Customer_Account (Customer_ID, Account_Number) VALUES (1, 10001);
 INSERT INTO Customer_Account (Customer_ID, Account_Number) VALUES (1, 10002);
 INSERT INTO Customer_Account (Customer_ID, Account_Number) VALUES (2, 10003);
-INSERT INTO Customer_Account (Customer_ID, Account_Number) VALUES (7, 70001);
+INSERT INTO Customer_Account (Customer_ID, Account_Number) VALUES (4, 70001);
 
 -- 5. CARDS (depends on Account)
 
@@ -107,5 +107,5 @@ VALUES (5002, 1, 50000.00, 10.00, TO_DATE('2027-05-09', 'YYYY-MM-DD'), 'Approved
 
 -- 8. DEPARTMENT_MANAGERS (depends on Employees, Department)
 
-INSERT INTO Department_Managers (Employee_ID, Dep_ID) VALUES (1001, 10);
-INSERT INTO Department_Managers (Employee_ID, Dep_Id) VALUES (777, 10);
+INSERT INTO Department_Managers (Employee_ID, Dep_ID) VALUES (1, 10);
+INSERT INTO Department_Managers (Employee_ID, Dep_Id) VALUES (3, 10);

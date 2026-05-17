@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, UserPlus, Search, ShieldCheck,
@@ -7,7 +7,7 @@ import {
 import axios from 'axios';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 import { validateEgyptianPhone, validatePhones, validateEmail, validateName, validateSalary } from '../../utils/validation.js';
-import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, filterJobsByDepartment, canSupervise, ROLE_RANK } from '../../utils/jobMappings.js';
+import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, filterJobsByDepartment, filterJobsByPermission, canSupervise, ROLE_RANK } from '../../utils/jobMappings.js';
 
 export default function StaffManagement() {
   const navigate = useNavigate();
@@ -33,6 +33,7 @@ export default function StaffManagement() {
   const [filterJobTitle, setFilterJobTitle] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
   const [branches, setBranches] = useState([]);
+  const originalMemberRef = useRef(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -119,8 +120,8 @@ export default function StaffManagement() {
     fetchStaff();
   }, [filterDepartment, filterJobTitle, filterBranch]);
 
-  // Build dynamic role dropdown options based on editing staff's department AND user permissions
-  const editRoleOptions = editingStaff && editingStaff.DEP_ID
+  // Build role dropdown options always filtered by selected department
+  const editRoleOptions = editingStaff?.DEP_ID && jobId
     ? getJobDropdownOptionsByPermission(allJobs, jobId, editingStaff.DEP_ID)
     : [];
 
@@ -189,6 +190,7 @@ export default function StaffManagement() {
       alert('You do not have permission to edit this staff member.');
       return;
     }
+    originalMemberRef.current = member;
     // Reset validation state
     setEditFieldErrors({});
     setEditTouched({});
@@ -257,10 +259,14 @@ export default function StaffManagement() {
       }
     }
 
+    const roleJob = allJobs.find(j => (j.JOB_TITLE || j.job_title) === newJobTitle);
+    const newJobId = roleJob ? (roleJob.JOB_ID || roleJob.job_id) : editingStaff.JOB_ID;
+
     setEditingStaff({
       ...editingStaff,
       DEP_ID: id,
-      JOB_TITLE: newJobTitle
+      JOB_TITLE: newJobTitle,
+      JOB_ID: newJobId
     });
   };
 
@@ -291,26 +297,41 @@ export default function StaffManagement() {
 
     try {
       const validPhones = editingStaff.phones.filter(phone => phone && phone.trim() !== '');
+      const orig = originalMemberRef.current || {};
       const payload = {
         firstName: editingStaff.FIRST_NAME,
         middleName: editingStaff.MIDDLE_NAME || null,
         lastName: editingStaff.LAST_NAME,
         email: editingStaff.EMAIL,
-        role: editingStaff.JOB_TITLE,
-        salary: editingStaff.SALARY,
-        username: editingStaff.USERNAME || null,
-        supervisorId: editingStaff.SUPERVISOR_ID !== undefined ? editingStaff.SUPERVISOR_ID : undefined,
         password: editingStaff.password || null,
         phones: validPhones,
-        depId: editingStaff.DEP_ID || null,
         requesterId: staffEmployeeId
       };
+      // Only include fields that actually changed
+      if (String(editingStaff.JOB_TITLE) !== String(orig.JOB_TITLE)) {
+        payload.role = editingStaff.JOB_TITLE;
+      }
+      if (String(editingStaff.SALARY) !== String(orig.SALARY)) {
+        payload.salary = editingStaff.SALARY;
+      }
+      if (String(editingStaff.USERNAME || '') !== String(orig.USERNAME || '')) {
+        payload.username = editingStaff.USERNAME || null;
+      }
+      if (String(editingStaff.SUPERVISOR_ID ?? '') !== String(orig.SUPERVISOR_ID ?? '')) {
+        payload.supervisorId = editingStaff.SUPERVISOR_ID !== undefined ? editingStaff.SUPERVISOR_ID : undefined;
+      }
+      if (String(editingStaff.DEP_ID || '') !== String(orig.DEP_ID || '')) {
+        payload.depId = editingStaff.DEP_ID || null;
+      }
+      if (String(editingStaff.BRANCH_ID || '') !== String(orig.BRANCH_ID || '')) {
+        payload.branchId = editingStaff.BRANCH_ID || null;
+      }
       await axios.put(`http://localhost:3000/staff/${editingStaff.EMPLOYEE_ID}`, payload);
       fetchStaff();
       setIsPanelOpen(false);
     } catch (err) {
       console.error('Failed to update staff:', err);
-      alert('Failed to update staff member');
+      setEditSaveError(err.response?.data?.message || 'Failed to update staff member');
     }
   };
 
@@ -716,7 +737,9 @@ export default function StaffManagement() {
                           value={editingStaff.JOB_TITLE || ''}
                           onChange={(e) => {
                             const newRole = e.target.value;
-                            setEditingStaff({...editingStaff, JOB_TITLE: newRole});
+                            const roleJob = allJobs.find(j => (j.JOB_TITLE || j.job_title) === newRole);
+                            const newJobId = roleJob ? (roleJob.JOB_ID || roleJob.job_id) : editingStaff.JOB_ID;
+                            setEditingStaff({...editingStaff, JOB_TITLE: newRole, JOB_ID: newJobId});
                             const err = validateSalary(editingStaff.SALARY, newRole, salaryRanges);
                             setEditFieldErrors({...editFieldErrors, SALARY: err});
                             setEditTouched({...editTouched, SALARY: true});
@@ -777,6 +800,7 @@ export default function StaffManagement() {
                             .filter(s => {
                               if (Number(s.EMPLOYEE_ID) === Number(editingStaff.EMPLOYEE_ID)) return false;
                               if (Number(s.BRANCH_ID) !== Number(editingStaff.BRANCH_ID)) return false;
+                              if (editingStaff.DEP_ID && Number(s.DEP_ID) !== Number(editingStaff.DEP_ID)) return false;
                               const sJobId = Number(s.JOB_ID);
                               const tJobId = Number(editingStaff.JOB_ID);
                               return canSupervise(sJobId, tJobId);

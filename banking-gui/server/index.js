@@ -19,6 +19,22 @@ const calculateAge = (dob) => {
   return age;
 };
 
+// Translates Oracle errors to user-friendly messages
+const friendlyOracleError = (err) => {
+  if (!err || !err.errorNum) return err?.message || 'An unexpected error occurred.';
+  switch (err.errorNum) {
+    case 1: return 'A record with that unique value already exists (duplicate entry).';
+    case 1400: return 'A required field is missing (cannot insert NULL).';
+    case 1407: return 'A required field cannot be empty.';
+    case 2290: return 'A value violates a database constraint (out of allowed range).';
+    case 2291: return 'Referenced record not found (invalid ID reference).';
+    case 2292: return 'Cannot delete this record because other records depend on it.';
+    case 12899: return 'Value is too long for the database column.';
+    case 28: return 'Your session has been terminated. Please try again.';
+    default: return `Database error (${err.errorNum}): ${err.message}`;
+  }
+};
+
 app.use(cors());
 app.use(express.json());
 
@@ -1707,7 +1723,7 @@ app.post("/staff", async (req, res) => {
     // 0b. PERMISSION CHECK: Who can create what
     // JOB_ID = 3 (IT_System_Administrator): Can create any role
     // JOB_ID = 1 (RB_Department_Manager): Can create Tellers (2) in their department
-    // JOB_ID = 4 (RB_Branch_Manager): Can create Tellers (2) in their branch
+    // JOB_ID = 4 (RB_Branch_Manager): Can create Tellers (2) and Department Managers (1) in their branch
     // JOB_ID = 2 (RB_Teller): Cannot create anyone
 
     const roleResult = await connection.execute(
@@ -1727,11 +1743,11 @@ app.post("/staff", async (req, res) => {
       return res.status(403).json({ success: false, message: "Tellers cannot create staff members." });
     }
 
-    // Branch Manager (JOB_ID=4) can ONLY create Tellers (job_id 2) - cannot create Department Manager or IT roles
+    // Branch Manager (JOB_ID=4) can create Tellers (2) and Department Managers (1)
     const roleStartsWithIT = role && role.startsWith('IT_');
     if (requesterJobId === 4) {
-      if (targetJobId !== 2 || roleStartsWithIT) {
-        return res.status(403).json({ success: false, message: "Branch Managers can only create Teller positions." });
+      if (roleStartsWithIT || (targetJobId !== 1 && targetJobId !== 2)) {
+        return res.status(403).json({ success: false, message: "Branch Managers can only create Teller and Department Manager positions." });
       }
     }
 
@@ -1867,7 +1883,7 @@ app.post("/staff", async (req, res) => {
   } catch (err) {
     console.error("Error creating staff:", err);
     if (connection) await connection.rollback();
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: friendlyOracleError(err) });
   } finally {
     if (connection) await connection.close();
   }
@@ -1901,7 +1917,7 @@ app.put("/staff/:employeeId", async (req, res) => {
 
     // Get target employee info for permission validation
     const targetResult = await connection.execute(
-      `SELECT job_id, branch_id, supervisor_id FROM employees WHERE employee_id = :empId`,
+      `SELECT job_id, branch_id, supervisor_id, salary, dep_id FROM employees WHERE employee_id = :empId`,
       { empId: employeeId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -1910,10 +1926,33 @@ app.put("/staff/:employeeId", async (req, res) => {
       return res.status(404).json({ message: "Employee not found." });
     }
 
-    const targetJobId = targetResult.rows[0].JOB_ID;
-    const targetBranchId = targetResult.rows[0].BRANCH_ID;
-    const targetSupervisorId = targetResult.rows[0].SUPERVISOR_ID;
+    const targetRow = targetResult.rows[0];
+    const targetJobId = targetRow.JOB_ID;
+    const targetBranchId = targetRow.BRANCH_ID;
+    const targetSupervisorId = targetRow.SUPERVISOR_ID;
+    const targetSalary = targetRow.SALARY;
+    const targetDepId = targetRow.DEP_ID;
     const isSelfEdit = String(employeeId) === String(requesterId);
+
+    // Determine which fields actually changed vs staying the same
+    let submittedRoleJobId = null;
+    if (role) {
+      const roleLookup = await connection.execute(
+        `SELECT job_id FROM jobs WHERE job_title = :role`,
+        { role },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (roleLookup.rows.length > 0) {
+        submittedRoleJobId = roleLookup.rows[0].JOB_ID;
+      }
+    }
+    const roleChanged = submittedRoleJobId !== null && submittedRoleJobId !== targetJobId;
+    const salaryChanged = salary !== undefined && salary !== null && salary !== ''
+      && Number(salary) !== Number(targetSalary);
+    const depIdChanged = depId !== undefined && depId !== null && depId !== ''
+      && Number(depId) !== Number(targetDepId);
+    const branchIdChanged = branchId !== undefined && branchId !== null && branchId !== ''
+      && Number(branchId) !== Number(targetBranchId);
 
     // Duplicate email check
     if (email) {
@@ -1941,30 +1980,30 @@ app.put("/staff/:employeeId", async (req, res) => {
 
     // PERMISSION CHECK: Who can edit what
     // Hierarchical: Admin (3) → Branch Manager (4) → Dept Manager (1) → Teller (2)
-    // Teller (JOB_ID=2) cannot edit anyone
-    if (requesterJobId === 2) {
-      return res.status(403).json({ message: "Tellers cannot edit staff." });
-    }
 
-    // SELF-EDIT: Anyone can edit their own profile, but only phone and password
+    // SELF-EDIT: Anyone can edit their own profile (name, email, phone, password)
     // Cannot change role, salary, department, branch
     if (isSelfEdit) {
-      if (role !== undefined && role !== null && role !== '') {
+      if (roleChanged) {
         return res.status(403).json({ message: "You cannot change your own role." });
       }
-      if (salary !== undefined && salary !== null && salary !== '') {
+      if (salaryChanged) {
         return res.status(403).json({ message: "You cannot change your own salary." });
       }
-      if (depId !== undefined && depId !== null && depId !== '') {
+      if (depIdChanged) {
         return res.status(403).json({ message: "You cannot change your own department." });
       }
-      if (branchId !== undefined && branchId !== null && branchId !== '') {
+      if (branchIdChanged) {
         return res.status(403).json({ message: "You cannot change your own branch." });
       }
     }
+    // TELLER (JOB_ID=2): Cannot edit other staff, but CAN self-edit (name, email, phone, password)
+    else if (requesterJobId === 2) {
+      return res.status(403).json({ message: "Tellers cannot edit other staff members." });
+    }
     // ADMIN (JOB_ID=3): can edit everyone with all fields
     else if (requesterJobId === 3) {
-      if (role) {
+      if (roleChanged) {
         const jobResult = await connection.execute(
           `SELECT job_id, min_salary, max_salary FROM jobs WHERE job_title = :role`,
           { role },
@@ -1973,8 +2012,8 @@ app.put("/staff/:employeeId", async (req, res) => {
         if (jobResult.rows.length === 0) {
           return res.status(400).json({ message: `Role "${role}" not found in Jobs table.` });
         }
-        const { JOB_ID, MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
-        if (salary && (salary < MIN_SALARY || salary > MAX_SALARY)) {
+        const { MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+        if (salaryChanged && (salary < MIN_SALARY || salary > MAX_SALARY)) {
           return res.status(400).json({
             message: `Salary violation: For a ${role}, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.`
           });
@@ -1992,38 +2031,38 @@ app.put("/staff/:employeeId", async (req, res) => {
         return res.status(403).json({ message: "You can only edit Department Managers and Tellers." });
       }
       // Cannot change department or branch
-      if (depId !== undefined && depId !== null && depId !== '') {
+      if (depIdChanged) {
         return res.status(403).json({ message: "You cannot change staff department." });
       }
-      if (branchId !== undefined && branchId !== null && branchId !== '') {
+      if (branchIdChanged) {
         return res.status(403).json({ message: "You cannot change staff branch." });
       }
       // Role IS allowed but validate target is not admin (3) or branch manager (4)
-      if (role !== undefined && role !== null && role !== '') {
-        const newRoleResult = await connection.execute(
-          `SELECT job_id FROM jobs WHERE job_title = :role`,
-          { role },
-          { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
-        if (newRoleResult.rows.length > 0) {
-          const newJobId = newRoleResult.rows[0].JOB_ID;
-          if (newJobId === 3 || newJobId === 4) {
-            return res.status(403).json({ message: "You cannot promote staff to Administrator or Branch Manager." });
-          }
+      if (roleChanged) {
+        if (submittedRoleJobId === 3 || submittedRoleJobId === 4) {
+          return res.status(403).json({ message: "You cannot promote staff to Administrator or Branch Manager." });
         }
       }
       // Salary IS allowed - validate if provided
-      if (salary !== undefined && salary !== null && salary !== '') {
+      if (salaryChanged) {
+        // Use the NEW role's salary range when role is also changing
+        const salaryJobId = roleChanged ? submittedRoleJobId : targetJobId;
         const jobResult = await connection.execute(
           `SELECT min_salary, max_salary FROM jobs WHERE job_id = :jobId`,
-          { jobId: targetJobId },
+          { jobId: salaryJobId },
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
         if (jobResult.rows.length > 0) {
           const { MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+          // Also resolve the role name for the error message
+          const roleName = roleChanged ? role : (await connection.execute(
+            `SELECT job_title FROM jobs WHERE job_id = :jobId`,
+            { jobId: targetJobId },
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          )).rows[0]?.JOB_TITLE || 'this role';
           if (salary < MIN_SALARY || salary > MAX_SALARY) {
             return res.status(400).json({ 
-              message: `Salary violation: For this role, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
+              message: `Salary violation: For ${roleName}, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
             });
           }
         }
@@ -2040,7 +2079,7 @@ app.put("/staff/:employeeId", async (req, res) => {
       const requesterDepId = requesterDepResult.rows.length > 0 ? requesterDepResult.rows[0].DEP_ID : null;
       
       // Target must be in same department AND same branch
-      if (requesterDepId && (targetResult.rows[0].DEP_ID !== requesterDepId || targetResult.rows[0].BRANCH_ID !== requesterBranchId)) {
+      if (requesterDepId && (targetDepId !== requesterDepId || targetBranchId !== requesterBranchId)) {
         return res.status(403).json({ message: "You can only edit staff in your department and branch." });
       }
       // Can only edit tellers
@@ -2048,18 +2087,18 @@ app.put("/staff/:employeeId", async (req, res) => {
         return res.status(403).json({ message: "You can only edit Tellers." });
       }
       // Cannot change role
-      if (role !== undefined && role !== null && role !== '') {
+      if (roleChanged) {
         return res.status(403).json({ message: "You cannot change staff roles." });
       }
       // Cannot change department or branch
-      if (depId !== undefined && depId !== null && depId !== '') {
+      if (depIdChanged) {
         return res.status(403).json({ message: "You cannot change staff department." });
       }
-      if (branchId !== undefined && branchId !== null && branchId !== '') {
+      if (branchIdChanged) {
         return res.status(403).json({ message: "You cannot change staff branch." });
       }
       // Salary IS allowed - validate if provided
-      if (salary !== undefined && salary !== null && salary !== '') {
+      if (salaryChanged) {
         const jobResult = await connection.execute(
           `SELECT min_salary, max_salary FROM jobs WHERE job_id = :jobId`,
           { jobId: targetJobId },
@@ -2095,33 +2134,26 @@ app.put("/staff/:employeeId", async (req, res) => {
       updateFields.push('username = :username');
     }
 
-    // Admin and Branch Manager can change role
-    if ((requesterJobId === 3 || requesterJobId === 4) && role && !isSelfEdit) {
-      const jobResult = await connection.execute(
-        `SELECT job_id FROM jobs WHERE job_title = :role`,
-        { role },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      if (jobResult.rows.length > 0) {
-        params.jobId = jobResult.rows[0].JOB_ID;
-        updateFields.push('job_id = :jobId');
-      }
+    // Admin and Branch Manager can change role (only if it actually changed)
+    if ((requesterJobId === 3 || requesterJobId === 4) && roleChanged && !isSelfEdit) {
+      params.jobId = submittedRoleJobId;
+      updateFields.push('job_id = :jobId');
     }
 
-    // Admin, Branch Manager, and Department Manager can change salary
-    if ((requesterJobId === 3 || requesterJobId === 4 || requesterJobId === 1) && salary && !isSelfEdit) {
+    // Admin, Branch Manager, and Department Manager can change salary (only if it actually changed)
+    if ((requesterJobId === 3 || requesterJobId === 4 || requesterJobId === 1) && salaryChanged && !isSelfEdit) {
       params.salary = salary;
       updateFields.push('salary = :salary');
     }
 
-    // Password update
-    // Only Admin can change department and branch
-    if (requesterJobId === 3 && depId !== undefined && depId !== null && depId !== '' && !isSelfEdit) {
+    // Only Admin can change department (only if it actually changed)
+    if (requesterJobId === 3 && depIdChanged && !isSelfEdit) {
       params.depId = Number(depId);
       updateFields.push('dep_id = :depId');
     }
 
-    if (requesterJobId === 3 && branchId !== undefined && branchId !== null && branchId !== '' && !isSelfEdit) {
+    // Only Admin can change branch (only if it actually changed)
+    if (requesterJobId === 3 && branchIdChanged && !isSelfEdit) {
       params.branchId = Number(branchId);
       updateFields.push('branch_id = :branchId');
     }
@@ -2161,7 +2193,7 @@ app.put("/staff/:employeeId", async (req, res) => {
   } catch (err) {
     console.error("Update error:", err);
     if (connection) await connection.rollback();
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: friendlyOracleError(err) });
   } finally {
     if (connection) await connection.close();
   }
@@ -2215,7 +2247,7 @@ app.delete("/staff/:employeeId", async (req, res) => {
     res.json({ success: true, message: "Staff removed" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: friendlyOracleError(err) });
   } finally {
     if (connection) await connection.close();
   }
@@ -2458,7 +2490,7 @@ app.post("/staff/:employeeId/dependants", async (req, res) => {
     res.json({ success: true, message: "Dependant added successfully." });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: friendlyOracleError(err) });
   } finally {
     if (connection) await connection.close();
   }
@@ -2537,7 +2569,7 @@ app.delete("/staff/:employeeId/dependants/:nationalId", async (req, res) => {
     res.json({ success: true, message: "Dependant removed successfully." });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: friendlyOracleError(err) });
   } finally {
     if (connection) await connection.close();
   }
@@ -2624,7 +2656,7 @@ app.put("/staff/:employeeId/dependants/:nationalId", async (req, res) => {
     res.json({ success: true, message: "Dependant updated successfully." });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: friendlyOracleError(err) });
   } finally {
     if (connection) await connection.close();
   }

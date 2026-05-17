@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Mail, Phone, Briefcase, Building2,  Calendar, User, ShieldCheck,
@@ -7,7 +7,7 @@ import {
 import axios from 'axios';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 import { validateEgyptianPhone, validatePhones, validateEmail, validateName, validateSalary } from '../../utils/validation.js';
-import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, canSupervise } from '../../utils/jobMappings.js';
+import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, filterJobsByPermission, canSupervise } from '../../utils/jobMappings.js';
 
 export default function StaffDetails() {
   const navigate = useNavigate();
@@ -90,6 +90,7 @@ export default function StaffDetails() {
   const [editTouched, setEditTouched] = useState({});
   const [editSaveError, setEditSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const originalMemberRef = useRef(null);
 
   // Dependant management
   const [showAddDependant, setShowAddDependant] = useState(false);
@@ -113,7 +114,7 @@ export default function StaffDetails() {
           axios.get('http://localhost:3000/jobs'),
           axios.get('http://localhost:3000/branches'),
           axios.get('http://localhost:3000/staff', {
-            params: { supervisorId: loggedInStaff.EMPLOYEE_ID, jobId: loggedInStaff.JOB_ID, branchId: loggedInStaff.BRANCH_ID }
+            params: { supervisorId: loggedInStaff.EMPLOYEE_ID, ...(loggedInStaff.JOB_ID === 3 ? {} : { branchId: loggedInStaff.BRANCH_ID }) }
           }),
           axios.get(`http://localhost:3000/staff/${employeeId}/dependants`)
         ]);
@@ -141,9 +142,9 @@ export default function StaffDetails() {
     if (employeeId) fetchData();
   }, [employeeId]);
 
-  // Build dynamic role dropdown options based on selected department AND user permissions
+  // Build role dropdown options always filtered by selected department
   const loggedInJobId = loggedInStaff.JOB_ID || null;
-  const editRoleOptions = editForm && editForm.DEP_ID
+  const editRoleOptions = editForm?.DEP_ID && loggedInJobId
     ? getJobDropdownOptionsByPermission(allJobs, loggedInJobId, editForm.DEP_ID)
     : [];
 
@@ -159,10 +160,14 @@ export default function StaffDetails() {
       }
     }
 
+    const roleJob = allJobs.find(j => (j.JOB_TITLE || j.job_title) === newJobTitle);
+    const newJobId = roleJob ? (roleJob.JOB_ID || roleJob.job_id) : editForm.JOB_ID;
+
     setEditForm({
       ...editForm,
       DEP_ID: id,
-      JOB_TITLE: newJobTitle
+      JOB_TITLE: newJobTitle,
+      JOB_ID: newJobId
     });
   };
 
@@ -204,6 +209,7 @@ export default function StaffDetails() {
       alert('You do not have permission to edit this staff member.');
       return;
     }
+    originalMemberRef.current = staff;
     setEditFieldErrors({});
     setEditTouched({});
     setEditSaveError('');
@@ -272,21 +278,36 @@ export default function StaffDetails() {
     setIsSaving(true);
     try {
       const validPhones = editPhones.filter(phone => phone && phone.trim() !== '');
-      await axios.put(`http://localhost:3000/staff/${employeeId}`, {
+      const orig = originalMemberRef.current || {};
+      const payload = {
         firstName: editForm.FIRST_NAME,
         middleName: editForm.MIDDLE_NAME || null,
         lastName: editForm.LAST_NAME,
         email: editForm.EMAIL,
-        role: editForm.JOB_TITLE,
-        salary: editForm.SALARY,
-        username: editForm.USERNAME || null,
-        supervisorId: editForm.SUPERVISOR_ID !== undefined ? editForm.SUPERVISOR_ID : undefined,
         password: editForm.password || null,
         phones: validPhones,
-        depId: editForm.DEP_ID || null,
-        branchId: editForm.BRANCH_ID || null,
         requesterId: loggedInStaff.EMPLOYEE_ID || null
-      });
+      };
+      // Only include fields that actually changed
+      if (String(editForm.JOB_TITLE) !== String(orig.JOB_TITLE)) {
+        payload.role = editForm.JOB_TITLE;
+      }
+      if (String(editForm.SALARY) !== String(orig.SALARY)) {
+        payload.salary = editForm.SALARY;
+      }
+      if (String(editForm.USERNAME || '') !== String(orig.USERNAME || '')) {
+        payload.username = editForm.USERNAME || null;
+      }
+      if (String(editForm.SUPERVISOR_ID ?? '') !== String(orig.SUPERVISOR_ID ?? '')) {
+        payload.supervisorId = editForm.SUPERVISOR_ID !== undefined ? editForm.SUPERVISOR_ID : undefined;
+      }
+      if (String(editForm.DEP_ID || '') !== String(orig.DEP_ID || '')) {
+        payload.depId = editForm.DEP_ID || null;
+      }
+      if (String(editForm.BRANCH_ID || '') !== String(orig.BRANCH_ID || '')) {
+        payload.branchId = editForm.BRANCH_ID || null;
+      }
+      await axios.put(`http://localhost:3000/staff/${employeeId}`, payload);
 
       // Refresh staff details
       const staffRes = await axios.get(`http://localhost:3000/staff/${employeeId}/details`);
@@ -867,7 +888,16 @@ export default function StaffDetails() {
                   <select
                     className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
                     value={editForm.BRANCH_ID || ''}
-                    onChange={(e) => setEditForm({...editForm, BRANCH_ID: Number(e.target.value)})}
+                    onChange={(e) => {
+                      const newBranchId = Number(e.target.value);
+                      // Reset supervisor when branch changes (old supervisor not in new branch)
+                      const willChange = newBranchId !== Number(editForm.BRANCH_ID);
+                      setEditForm({
+                        ...editForm,
+                        BRANCH_ID: newBranchId,
+                        SUPERVISOR_ID: willChange ? null : editForm.SUPERVISOR_ID
+                      });
+                    }}
                   >
                     <option value="">Select Branch</option>
                     {branches.map(branch => (
@@ -886,7 +916,9 @@ export default function StaffDetails() {
                     value={editForm.JOB_TITLE || ''}
                     onChange={(e) => {
                       const newRole = e.target.value;
-                      setEditForm({...editForm, JOB_TITLE: newRole});
+                      const roleJob = allJobs.find(j => (j.JOB_TITLE || j.job_title) === newRole);
+                      const newJobId = roleJob ? (roleJob.JOB_ID || roleJob.job_id) : editForm.JOB_ID;
+                      setEditForm({...editForm, JOB_TITLE: newRole, JOB_ID: newJobId});
                       const err = validateSalary(editForm.SALARY, newRole, salaryRanges);
                       setEditFieldErrors({...editFieldErrors, SALARY: err});
                       setEditTouched({...editTouched, SALARY: true});
@@ -946,6 +978,7 @@ export default function StaffDetails() {
                       .filter(s => {
                         if (Number(s.EMPLOYEE_ID) === Number(employeeId)) return false;
                         if (Number(s.BRANCH_ID) !== Number(editForm.BRANCH_ID)) return false;
+                        if (editForm.DEP_ID && Number(s.DEP_ID) !== Number(editForm.DEP_ID)) return false;
                         const sJobId = Number(s.JOB_ID);
                         const tJobId = Number(editForm.JOB_ID);
                         return canSupervise(sJobId, tJobId);
