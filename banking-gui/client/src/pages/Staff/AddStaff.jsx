@@ -6,12 +6,12 @@ import {
   ShieldCheck, CheckCircle, AlertCircle 
 } from 'lucide-react';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
-import {
+import { 
   validateEgyptianPhone, validatePhones,
   validateEmail, validateName, validateUsername,
   validatePassword, validateSalary
 } from '../../utils/validation.js';
-import { getJobDropdownOptions, stripJobPrefix, getPrefixForDepartment } from '../../utils/jobMappings.js';
+import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, canSupervise } from '../../utils/jobMappings.js';
 
 export default function AddStaff() {
   const navigate = useNavigate();
@@ -19,13 +19,18 @@ export default function AddStaff() {
   const [salaryRanges, setSalaryRanges] = useState({});
   const [departments, setDepartments] = useState([]);
   const [allJobs, setAllJobs] = useState([]);
+  const [staffList, setStaffList] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [jobsRes, depsRes] = await Promise.all([
+        const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+        const [jobsRes, depsRes, staffListRes] = await Promise.all([
           axios.get('http://localhost:3000/jobs'),
-          axios.get('http://localhost:3000/departments')
+          axios.get('http://localhost:3000/departments'),
+          axios.get('http://localhost:3000/staff', {
+            params: { supervisorId: staffData.EMPLOYEE_ID, jobId: staffData.JOB_ID, branchId: staffData.BRANCH_ID }
+          })
         ]);
         const ranges = {};
         jobsRes.data.forEach(job => {
@@ -34,6 +39,7 @@ export default function AddStaff() {
         setSalaryRanges(ranges);
         setAllJobs(jobsRes.data);
         setDepartments(depsRes.data);
+        setStaffList(staffListRes.data);
       } catch (err) {
         console.error("Failed to load data");
       }
@@ -43,6 +49,7 @@ export default function AddStaff() {
   
   const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
   const isManager = staffData.JOB_ID === 1 || staffData.JOB_ID === 3 || staffData.JOB_ID === 4;
+  const loggedInJobId = staffData.JOB_ID || null;
 
   if (!isManager) {
     return (
@@ -68,6 +75,7 @@ export default function AddStaff() {
 
   const [formData, setFormData] = useState({
     firstName: '',
+    middleName: '',
     lastName: '',
     email: '',
     role: '',
@@ -78,9 +86,9 @@ export default function AddStaff() {
     depId: ''
   });
 
-  // Determine role options based on selected department
+  // Determine role options based on selected department AND user permissions
   const roleOptions = formData?.depId
-    ? getJobDropdownOptions(allJobs, formData.depId)
+    ? getJobDropdownOptionsByPermission(allJobs, loggedInJobId, formData.depId)
     : [];
 
   const [isSuccess, setIsSuccess] = useState(false);
@@ -94,6 +102,7 @@ export default function AddStaff() {
     tempPassword: '', salary: ''
   });
   const [touched, setTouched] = useState({});
+  const [usernameTaken, setUsernameTaken] = useState('');
 
   const validateField = (name, value) => {
     switch (name) {
@@ -110,6 +119,7 @@ export default function AddStaff() {
 
   const handleFieldChange = (name, value) => {
     setFormData({ ...formData, [name]: value });
+    if (name === 'username') setUsernameTaken('');
     if (touched[name]) {
       setFieldErrors({ ...fieldErrors, [name]: validateField(name, value) });
     }
@@ -117,7 +127,26 @@ export default function AddStaff() {
 
   const handleFieldBlur = (name) => {
     setTouched({ ...touched, [name]: true });
-    setFieldErrors({ ...fieldErrors, [name]: validateField(name, formData[name]) });
+    const err = validateField(name, formData[name]);
+    setFieldErrors({ ...fieldErrors, [name]: err });
+    if (name === 'username' && !err && formData.username.trim().length >= 3) {
+      checkUsernameAvailability(formData.username);
+    }
+  };
+
+  const checkUsernameAvailability = async (username) => {
+    try {
+      const res = await axios.get('http://localhost:3000/staff/check-username', {
+        params: { username: username.trim() }
+      });
+      if (!res.data.available) {
+        setUsernameTaken('This username is already taken.');
+      } else {
+        setUsernameTaken('');
+      }
+    } catch {
+      setUsernameTaken('');
+    }
   };
 
   const getInputClass = (name) => {
@@ -131,7 +160,7 @@ export default function AddStaff() {
 
   const handleDepartmentChange = (depId) => {
     const id = depId ? Number(depId) : '';
-    const options = id ? getJobDropdownOptions(allJobs, id) : [];
+    const options = id ? getJobDropdownOptionsByPermission(allJobs, loggedInJobId, id) : [];
     const role = options.length > 0 ? options[0].value : '';
     setFormData({ ...formData, depId: id, role });
   };
@@ -172,9 +201,11 @@ export default function AddStaff() {
 
     try {
       const staffData = JSON.parse(localStorage.getItem('staff') || '{}');
+      const isAdmin = staffData.JOB_ID === 3;
       
 await axios.post('http://localhost:3000/staff', {
   firstName:    formData.firstName,
+  middleName:   formData.middleName || null,
   lastName:     formData.lastName,
   email:        formData.email,
   role:         formData.role,
@@ -183,7 +214,8 @@ await axios.post('http://localhost:3000/staff', {
   password:     formData.tempPassword,
   phones:       formData.phones,
   depId:        formData.depId || null,
-  supervisorId: staffData.EMPLOYEE_ID || null
+  supervisorId: isAdmin ? (formData.supervisorId || null) : (staffData.EMPLOYEE_ID || null),
+  requesterId:  staffData.EMPLOYEE_ID || null
 });
 
       setIsSuccess(true);
@@ -289,6 +321,20 @@ const updatePhone = (index, value) => {
                       <AlertCircle size={12} /> {fieldErrors.firstName}
                     </p>
                   )}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    <ShieldCheck size={14} className="text-[#a37e2c]" /> Middle Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="(Optional)"
+                    className={getInputClass('middleName')}
+                    value={formData.middleName}
+                    onChange={(e) => handleFieldChange('middleName', e.target.value)}
+                    disabled={isSubmitting}
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -399,6 +445,37 @@ const updatePhone = (index, value) => {
                 </div>
               </div>
 
+              {/* Supervisor - dropdown for admin showing higher roles in department */}
+              {loggedInJobId === 3 && formData.depId && formData.role && (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    <ShieldCheck size={14} className="text-[#a37e2c]" /> Supervisor
+                  </label>
+                  <select
+                    value={formData.supervisorId || ''}
+                    onChange={(e) => setFormData({...formData, supervisorId: e.target.value ? Number(e.target.value) : null})}
+                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004a99] appearance-none font-medium"
+                  >
+                    <option value="">Select Supervisor</option>
+                    {(() => {
+                      const roleJob = allJobs.find(j => (j.JOB_TITLE || j.job_title) === formData.role);
+                      const roleJobId = roleJob ? (roleJob.JOB_ID || roleJob.job_id) : null;
+                      return staffList
+                        .filter(s => {
+                          if (Number(s.DEP_ID) !== Number(formData.depId)) return false;
+                          const sJobId = Number(s.JOB_ID || s.job_id);
+                          return roleJobId && canSupervise(sJobId, roleJobId);
+                        })
+                        .map(s => (
+                          <option key={s.EMPLOYEE_ID || s.employee_id} value={s.EMPLOYEE_ID || s.employee_id}>
+                            {s.FIRST_NAME}{s.MIDDLE_NAME ? ' ' + s.MIDDLE_NAME : ''} {s.LAST_NAME} ({stripJobPrefix(s.JOB_TITLE || s.job_title)})
+                          </option>
+                        ));
+                    })()}
+                  </select>
+                </div>
+              )}
+
               <div className="space-y-2">
    <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase ml-1">
      <ShieldCheck size={14} className="text-[#a37e2c]" /> Username
@@ -406,7 +483,11 @@ const updatePhone = (index, value) => {
       required
       type="text"
       placeholder="ahmed.kamal"
-      className={getInputClass('username')}
+      className={`w-full px-6 py-4 rounded-2xl outline-none focus:ring-2 transition-all font-medium ${
+        (fieldErrors.username && touched.username) || usernameTaken
+          ? 'bg-red-50 border border-red-300 focus:ring-red-400'
+          : 'bg-gray-50 border border-gray-200 focus:ring-[#004a99]'
+      }`}
       value={formData.username}
       onChange={(e) => handleFieldChange('username', e.target.value)}
       onBlur={() => handleFieldBlur('username')}
@@ -415,6 +496,11 @@ const updatePhone = (index, value) => {
     {fieldErrors.username && touched.username && (
       <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
         <AlertCircle size={12} /> {fieldErrors.username}
+      </p>
+    )}
+    {usernameTaken && (
+      <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+        <AlertCircle size={12} /> {usernameTaken}
       </p>
     )}
  </div>

@@ -7,7 +7,7 @@ import {
 import axios from 'axios';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 import { validateEgyptianPhone, validatePhones, validateEmail, validateName, validateSalary } from '../../utils/validation.js';
-import { getJobDropdownOptions, stripJobPrefix, getPrefixForDepartment } from '../../utils/jobMappings.js';
+import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, filterJobsByDepartment, canSupervise, ROLE_RANK } from '../../utils/jobMappings.js';
 
 export default function StaffManagement() {
   const navigate = useNavigate();
@@ -23,6 +23,7 @@ export default function StaffManagement() {
   const [editFieldErrors, setEditFieldErrors] = useState({});
   const [editTouched, setEditTouched] = useState({});
   const [editSaveError, setEditSaveError] = useState('');
+  const [usernameError, setUsernameError] = useState('');
   const [salaryRanges, setSalaryRanges] = useState({});
   const [allJobs, setAllJobs] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -30,13 +31,16 @@ export default function StaffManagement() {
   // Super admin filter state
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterJobTitle, setFilterJobTitle] = useState('');
+  const [filterBranch, setFilterBranch] = useState('');
+  const [branches, setBranches] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [jobsRes, depsRes] = await Promise.all([
+        const [jobsRes, depsRes, branchesRes] = await Promise.all([
           axios.get('http://localhost:3000/jobs'),
-          axios.get('http://localhost:3000/departments')
+          axios.get('http://localhost:3000/departments'),
+          axios.get('http://localhost:3000/branches')
         ]);
         const ranges = {};
         jobsRes.data.forEach(job => {
@@ -45,8 +49,9 @@ export default function StaffManagement() {
         setSalaryRanges(ranges);
         setAllJobs(jobsRes.data);
         setDepartments(depsRes.data);
+        setBranches(branchesRes.data);
       } catch (err) {
-        console.error("Failed to load job/department data");
+        console.error("Failed to load job/department/branch data");
       }
     };
     fetchData();
@@ -56,14 +61,72 @@ export default function StaffManagement() {
   const staffEmployeeId = staffData.EMPLOYEE_ID;
   const jobId = staffData.JOB_ID;
 
+  const canEditStaff = (member) => {
+    if (jobId === 2) return false; // Tellers cannot edit anyone
+    if (jobId === 3) return true; // Admin can view and edit everyone
+    
+    const isSelfEdit = member.EMPLOYEE_ID === staffEmployeeId;
+    const memberJobId = member.JOB_ID || member.job_id;
+    const memberDepId = member.DEP_ID || member.dep_id;
+    
+    // Branch Manager (4): can edit dept managers (1) and tellers (2) in their branch
+    if (jobId === 4) {
+      if (isSelfEdit) return true;
+      if (member.BRANCH_ID !== staffData.BRANCH_ID) return false;
+      // Can only edit dept managers and tellers
+      if (memberJobId === 1 || memberJobId === 2) return true;
+      return false;
+    }
+    
+    // Department Manager (1): can only edit tellers (2) in their department and branch
+    if (jobId === 1) {
+      if (isSelfEdit) return true;
+      if (member.BRANCH_ID !== staffData.BRANCH_ID) return false;
+      if (memberDepId !== staffData.DEP_ID) return false;
+      if (memberJobId === 2) return true;
+      return false;
+    }
+    
+    return false;
+  };
+
+  const canAddDependant = (member) => {
+    if (jobId === 3) return true; // Admin can add dependants to anyone
+    if (jobId === 2) return false; // Tellers cannot add dependants
+    
+    // Branch Manager (4): can add dependants for dept managers (1) and tellers (2) in their branch
+    if (jobId === 4) {
+      const memberJobId = member.JOB_ID || member.job_id;
+      if (member.BRANCH_ID !== staffData.BRANCH_ID) return false;
+      if (memberJobId === 1 || memberJobId === 2) return true;
+      return false;
+    }
+    
+    // Department Manager (1): can add dependants ONLY to tellers (JOB_ID=2) in their department and branch
+    if (jobId === 1) {
+      const memberJobId = member.JOB_ID || member.job_id;
+      const memberDepId = member.DEP_ID || member.dep_id;
+      if (memberJobId === 2 && memberDepId === staffData.DEP_ID && member.BRANCH_ID === staffData.BRANCH_ID) return true;
+      return false;
+    }
+    
+    return false;
+  };
+
+  const isLimitedManager = jobId === 1 || jobId === 4; // Branch/Dept managers have edit restrictions
+
   useEffect(() => {
     fetchStaff();
-  }, [filterDepartment, filterJobTitle]);
+  }, [filterDepartment, filterJobTitle, filterBranch]);
 
-  // Build dynamic role dropdown options based on editing staff's department
+  // Build dynamic role dropdown options based on editing staff's department AND user permissions
   const editRoleOptions = editingStaff && editingStaff.DEP_ID
-    ? getJobDropdownOptions(allJobs, editingStaff.DEP_ID)
+    ? getJobDropdownOptionsByPermission(allJobs, jobId, editingStaff.DEP_ID)
     : [];
+
+  // Filter jobs for dropdown based on selected department filter
+  const selectedDepId = filterDepartment ? departments.find(d => d.DEP_NAME === filterDepartment)?.DEP_ID : null;
+  const filteredJobsForFilter = selectedDepId ? filterJobsByDepartment(allJobs, selectedDepId) : allJobs;
 
   const validateEditField = (name, value) => {
     switch (name) {
@@ -109,6 +172,7 @@ export default function StaffManagement() {
       if (jobId === 3) {
         if (filterDepartment) params.departmentName = filterDepartment;
         if (filterJobTitle) params.jobTitle = filterJobTitle;
+        if (filterBranch) params.branchId = filterBranch;
       }
       const response = await axios.get('http://localhost:3000/staff', { params });
       setStaff(response.data);
@@ -121,11 +185,16 @@ export default function StaffManagement() {
   };
 
   const openEditPanel = async (member) => {
+    if (!canEditStaff(member)) {
+      alert('You do not have permission to edit this staff member.');
+      return;
+    }
     // Reset validation state
     setEditFieldErrors({});
     setEditTouched({});
     setEditSaveError('');
     setError('');
+    setUsernameError('');
     // Fetch phone numbers for this employee
     try {
       const phoneResponse = await axios.get(`http://localhost:3000/staff/${member.EMPLOYEE_ID}/phones`);
@@ -177,7 +246,7 @@ export default function StaffManagement() {
 
   const handleDepartmentChange = (depId) => {
     const id = depId ? Number(depId) : null;
-    const newRoleOptions = id ? getJobDropdownOptions(allJobs, id) : [];
+    const newRoleOptions = id ? getJobDropdownOptionsByPermission(allJobs, jobId, id) : [];
     let newJobTitle = editingStaff.JOB_TITLE;
     
     // If current role doesn't match the new department prefix, auto-select first option
@@ -224,13 +293,17 @@ export default function StaffManagement() {
       const validPhones = editingStaff.phones.filter(phone => phone && phone.trim() !== '');
       const payload = {
         firstName: editingStaff.FIRST_NAME,
+        middleName: editingStaff.MIDDLE_NAME || null,
         lastName: editingStaff.LAST_NAME,
         email: editingStaff.EMAIL,
         role: editingStaff.JOB_TITLE,
         salary: editingStaff.SALARY,
+        username: editingStaff.USERNAME || null,
+        supervisorId: editingStaff.SUPERVISOR_ID !== undefined ? editingStaff.SUPERVISOR_ID : undefined,
         password: editingStaff.password || null,
         phones: validPhones,
-        depId: editingStaff.DEP_ID || null
+        depId: editingStaff.DEP_ID || null,
+        requesterId: staffEmployeeId
       };
       await axios.put(`http://localhost:3000/staff/${editingStaff.EMPLOYEE_ID}`, payload);
       fetchStaff();
@@ -241,6 +314,26 @@ export default function StaffManagement() {
     }
   };
 
+  // Username inline availability check
+  const checkUsername = async (username) => {
+    if (!username || username.trim().length < 3) {
+      setUsernameError('');
+      return;
+    }
+    try {
+      const res = await axios.get('http://localhost:3000/staff/check-username', {
+        params: { username: username.trim(), excludeId: editingStaff?.EMPLOYEE_ID }
+      });
+      if (!res.data.available) {
+        setUsernameError('This username is already taken.');
+      } else {
+        setUsernameError('');
+      }
+    } catch {
+      setUsernameError('');
+    }
+  };
+
   const triggerDeleteRequest = (member) => {
     setStaffToDelete(member);
     setIsDeleteModalOpen(true);
@@ -248,13 +341,13 @@ export default function StaffManagement() {
 
   const confirmDelete = async () => {
     try {
-      await axios.delete(`http://localhost:3000/staff/${staffToDelete.EMPLOYEE_ID}`);
+      await axios.delete(`http://localhost:3000/staff/${staffToDelete.EMPLOYEE_ID}?requesterId=${staffData.EMPLOYEE_ID}`);
       fetchStaff();
       setIsDeleteModalOpen(false);
       setStaffToDelete(null);
     } catch (err) {
       console.error('Failed to delete staff:', err);
-      alert('Failed to remove staff member');
+      alert(err.response?.data?.message || 'Failed to remove staff member');
     }
   };
 
@@ -342,12 +435,22 @@ export default function StaffManagement() {
 
           {/* Super Admin Filter Toolbar — only visible to System Administrators (JOB_ID=3) */}
           {jobId === 3 && (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <Filter size={16} className="text-gray-400" />
               <select
+                value={filterBranch}
+                onChange={(e) => setFilterBranch(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 outline-none focus:ring-2 focus:ring-[#a37e2c] font-medium text-sm min-w-[110px]"
+              >
+                <option value="">All Branches</option>
+                {branches.map(branch => (
+                  <option key={branch.BRANCH_ID} value={branch.BRANCH_ID}>{branch.BRANCH_NAME}</option>
+                ))}
+              </select>
+              <select
                 value={filterDepartment}
-                onChange={(e) => setFilterDepartment(e.target.value)}
-                className="px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 outline-none focus:ring-2 focus:ring-[#a37e2c] font-medium text-sm"
+                onChange={(e) => { setFilterDepartment(e.target.value); setFilterJobTitle(''); }}
+                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 outline-none focus:ring-2 focus:ring-[#a37e2c] font-medium text-sm min-w-[130px]"
               >
                 <option value="">All Departments</option>
                 {departments.map(dep => (
@@ -357,10 +460,10 @@ export default function StaffManagement() {
               <select
                 value={filterJobTitle}
                 onChange={(e) => setFilterJobTitle(e.target.value)}
-                className="px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 outline-none focus:ring-2 focus:ring-[#a37e2c] font-medium text-sm"
+                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 outline-none focus:ring-2 focus:ring-[#a37e2c] font-medium text-sm min-w-[100px]"
               >
                 <option value="">All Roles</option>
-                {allJobs.map(job => (
+                {filteredJobsForFilter.map(job => (
                   <option key={job.JOB_ID} value={job.JOB_TITLE}>{stripJobPrefix(job.JOB_TITLE)}</option>
                 ))}
               </select>
@@ -402,13 +505,16 @@ export default function StaffManagement() {
                     <button onClick={() => navigate(`/staff/${member.EMPLOYEE_ID}`)} className="flex-1 py-2.5 bg-gray-50 text-gray-600 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 font-bold text-xs flex items-center justify-center gap-2 transition-all">
                       <Eye size={14} /> View
                     </button>
-                    {/* Allow self-editing — removed the member.EMPLOYEE_ID !== staffEmployeeId restriction */}
-                    <button onClick={() => openEditPanel(member)} className="flex-1 py-2.5 bg-gray-50 text-gray-600 rounded-xl hover:bg-blue-50 hover:text-[#004a99] font-bold text-xs flex items-center justify-center gap-2 transition-all">
-                      <Edit size={14} /> Edit
-                    </button>
-                    <button onClick={() => triggerDeleteRequest(member)} className="p-2.5 bg-gray-50 text-gray-400 rounded-xl hover:bg-red-50 hover:text-red-600 transition-all">
-                      <Trash2 size={16} />
-                    </button>
+                    {canEditStaff(member) && (
+                      <button onClick={() => openEditPanel(member)} className="flex-1 py-2.5 bg-gray-50 text-gray-600 rounded-xl hover:bg-blue-50 hover:text-[#004a99] font-bold text-xs flex items-center justify-center gap-2 transition-all">
+                        <Edit size={14} /> Edit
+                      </button>
+                    )}
+                    {staffData.JOB_ID === 3 && member.EMPLOYEE_ID !== staffEmployeeId && (
+                      <button onClick={() => triggerDeleteRequest(member)} className="p-2.5 bg-gray-50 text-gray-400 rounded-xl hover:bg-red-50 hover:text-red-600 transition-all">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -467,203 +573,317 @@ export default function StaffManagement() {
                 </div>
               )}
 
-              {/* Safety Intercept: If editing self, show warning */}
-              {editingStaff.EMPLOYEE_ID === staffEmployeeId && (
-                <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-amber-700 text-sm flex items-start gap-3">
-                  <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold">Editing Your Own Profile</p>
-                    <p className="text-amber-600 text-xs mt-1">Role, Department, and Salary changes are locked for self-editing. Contact an administrator to change your position or compensation.</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">First Name</label>
-                  <input
-                    className={getEditClass('FIRST_NAME')}
-                    value={editingStaff.FIRST_NAME || ''}
-                    onChange={(e) => handleEditChange('FIRST_NAME', e.target.value)}
-                    onBlur={() => handleEditBlur('FIRST_NAME')}
-                  />
-                  {editFieldErrors.FIRST_NAME && editTouched.FIRST_NAME && (
-                    <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                      <AlertCircle size={12} /> {editFieldErrors.FIRST_NAME}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Last Name</label>
-                  <input
-                    className={getEditClass('LAST_NAME')}
-                    value={editingStaff.LAST_NAME || ''}
-                    onChange={(e) => handleEditChange('LAST_NAME', e.target.value)}
-                    onBlur={() => handleEditBlur('LAST_NAME')}
-                  />
-                  {editFieldErrors.LAST_NAME && editTouched.LAST_NAME && (
-                    <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                      <AlertCircle size={12} /> {editFieldErrors.LAST_NAME}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Email</label>
-                <input
-                  className={getEditClass('EMAIL')}
-                  value={editingStaff.EMAIL || ''}
-                  onChange={(e) => handleEditChange('EMAIL', e.target.value)}
-                  onBlur={() => handleEditBlur('EMAIL')}
-                />
-                {editFieldErrors.EMAIL && editTouched.EMAIL && (
-                  <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                    <AlertCircle size={12} /> {editFieldErrors.EMAIL}
-                  </p>
-                )}
-              </div>
-
-              {/* Department Dropdown */}
-              <div className="flex flex-col gap-1.5">
-                <label className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase ml-1">
-                  <Building2 size={14} className="text-[#a37e2c]" /> Department
-                </label>
-                <select
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
-                  value={editingStaff.DEP_ID || ''}
-                  onChange={(e) => handleDepartmentChange(e.target.value)}
-                  disabled={editingStaff.EMPLOYEE_ID === staffEmployeeId}
-                >
-                  <option value="">Select Department</option>
-                  {departments.map(dep => (
-                    <option key={dep.DEP_ID} value={dep.DEP_ID}>{dep.DEP_NAME}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Role</label>
-                  <select
-                    className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
-                    value={editingStaff.JOB_TITLE || ''}
-                    onChange={(e) => {
-                      const newRole = e.target.value;
-                      setEditingStaff({...editingStaff, JOB_TITLE: newRole});
-                      const err = validateSalary(editingStaff.SALARY, newRole, salaryRanges);
-                      setEditFieldErrors({...editFieldErrors, SALARY: err});
-                      setEditTouched({...editTouched, SALARY: true});
-                    }}
-                    disabled={editingStaff.EMPLOYEE_ID === staffEmployeeId}
-                  >
-                    {!editingStaff.DEP_ID ? (
-                      <option value="">Select department first</option>
-                    ) : editRoleOptions.length === 0 ? (
-                      <option value="">No roles available</option>
-                    ) : (
-                      editRoleOptions.map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))
+              {/* Determine edit context */}
+              {(() => {
+                const isSelfEdit = editingStaff.EMPLOYEE_ID === staffEmployeeId;
+                const isITAdmin = jobId === 3;
+                const isLimitedEdit = (jobId === 1 || jobId === 4) && !isSelfEdit;
+                
+                return (
+                  <>
+                    {/* Self-edit warning */}
+                    {isSelfEdit && (
+                      <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-amber-700 text-sm flex items-start gap-3">
+                        <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">Editing Your Own Profile</p>
+                          <p className="text-amber-600 text-xs mt-1">{jobId === 3
+                            ? 'You can edit your name, email, phone numbers, and password. Role, Department, and Salary changes are locked for self-editing.'
+                            : 'You can only update your phone numbers and password. Contact an administrator to change your position or compensation.'}</p>
+                        </div>
+                      </div>
                     )}
-                  </select>
-                </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Salary ($)</label>
-                  <input
-                    type="number"
-                    min={salaryRanges[editingStaff.JOB_TITLE]?.min || 0}
-                    max={salaryRanges[editingStaff.JOB_TITLE]?.max || undefined}
-                    placeholder={salaryRanges[editingStaff.JOB_TITLE] ? `${salaryRanges[editingStaff.JOB_TITLE].min.toLocaleString()} - ${salaryRanges[editingStaff.JOB_TITLE].max.toLocaleString()}` : 'Enter salary'}
-                    className={getEditClass('SALARY')}
-                    value={editingStaff.SALARY || ''}
-                    onChange={(e) => handleEditChange('SALARY', e.target.value)}
-                    onBlur={() => handleEditBlur('SALARY')}
-                    disabled={editingStaff.EMPLOYEE_ID === staffEmployeeId}
-                  />
-                  {!editFieldErrors.SALARY && salaryRanges[editingStaff.JOB_TITLE] && (
-                    <p className="text-[10px] text-gray-400 font-medium ml-1 flex items-center gap-1">
-                      <Briefcase size={10} className="text-[#a37e2c]" />
-                      Range for {stripJobPrefix(editingStaff.JOB_TITLE)}: <b>${salaryRanges[editingStaff.JOB_TITLE].min.toLocaleString()}</b> — <b>${salaryRanges[editingStaff.JOB_TITLE].max.toLocaleString()}</b>
-                    </p>
-                  )}
-                  {editFieldErrors.SALARY && editTouched.SALARY && (
-                    <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                      <AlertCircle size={12} /> {editFieldErrors.SALARY}
-                    </p>
-                  )}
-                </div>
-              </div>
+                    {/* Name and Email - editable for others, and for admin self-edit */}
+                    {(jobId === 3 || !isSelfEdit) && (
+                      <>
+                        <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">First Name</label>
+                          <input
+                            className={getEditClass('FIRST_NAME')}
+                            value={editingStaff.FIRST_NAME || ''}
+                            onChange={(e) => handleEditChange('FIRST_NAME', e.target.value)}
+                            onBlur={() => handleEditBlur('FIRST_NAME')}
+                          />
+                          {editFieldErrors.FIRST_NAME && editTouched.FIRST_NAME && (
+                            <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {editFieldErrors.FIRST_NAME}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Middle Name</label>
+                          <input
+                            className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                            value={editingStaff.MIDDLE_NAME || ''}
+                            onChange={(e) => setEditingStaff({...editingStaff, MIDDLE_NAME: e.target.value})}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Last Name</label>
+                            <input
+                              className={getEditClass('LAST_NAME')}
+                              value={editingStaff.LAST_NAME || ''}
+                              onChange={(e) => handleEditChange('LAST_NAME', e.target.value)}
+                              onBlur={() => handleEditBlur('LAST_NAME')}
+                            />
+                            {editFieldErrors.LAST_NAME && editTouched.LAST_NAME && (
+                              <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                                <AlertCircle size={12} /> {editFieldErrors.LAST_NAME}
+                              </p>
+                            )}
+                          </div>
+                        </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Username (Read-Only)</label>
-                <input
-                  className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 font-semibold text-gray-500 cursor-not-allowed"
-                  value={editingStaff.USERNAME || ''}
-                  disabled
-                />
-              </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Email</label>
+                          <input
+                            className={getEditClass('EMAIL')}
+                            value={editingStaff.EMAIL || ''}
+                            onChange={(e) => handleEditChange('EMAIL', e.target.value)}
+                            onBlur={() => handleEditBlur('EMAIL')}
+                          />
+                          {editFieldErrors.EMAIL && editTouched.EMAIL && (
+                            <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {editFieldErrors.EMAIL}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Change Password (Optional)</label>
-                <input
-                  type="password"
-                  placeholder="Leave blank to keep current password"
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
-                  value={editingStaff.password || ''}
-                  onChange={(e) => setEditingStaff({...editingStaff, password: e.target.value})}
-                />
-              </div>
+                    {/* Show read-only info for non-admin self-edit */}
+                    {jobId !== 3 && isSelfEdit && (
+                      <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                        <div className="grid grid-cols-2 gap-4 mb-3">
+                          <div>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">Name</p>
+                            <p className="font-semibold text-gray-700">{editingStaff.FIRST_NAME} {editingStaff.MIDDLE_NAME ? editingStaff.MIDDLE_NAME + ' ' : ''}{editingStaff.LAST_NAME}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">Email</p>
+                            <p className="font-semibold text-gray-700">{editingStaff.EMAIL}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 italic">Contact an administrator to change your name or email.</p>
+                      </div>
+                    )}
 
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">
-                    Phone Numbers (Max 3)
-                  </label>
-                  {editingStaff.phones.length < 3 && (
-                    <button
-                      type="button"
-                      onClick={addPhoneField}
-                      className="text-xs font-bold text-[#004a99] hover:underline flex items-center gap-1"
-                    >
-                      <Plus size={14} /> Add
-                    </button>
-                  )}
-                </div>
+                    {/* Department/Role/Salary - Read-only for dept managers who cannot change these */}
+                    {jobId === 1 && !isSelfEdit && (
+                      <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                        <p className="text-xs text-gray-400 font-bold uppercase mb-2">Staff Information (Read-Only)</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">Role</p>
+                            <p className="font-semibold text-gray-700">{stripJobPrefix(editingStaff.JOB_TITLE) || 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">Department</p>
+                            <p className="font-semibold text-gray-700">{editingStaff.DEP_NAME || 'N/A'}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-2 italic">Contact your branch manager to change role or department.</p>
+                      </div>
+                    )}
 
-                {editingStaff.phones.map((phone, index) => (
-                  <div key={index} className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder={`Phone ${index + 1} (e.g. 01012345678)`}
-                        className={`flex-1 px-4 py-3 rounded-xl outline-none font-semibold transition-all ${
-                          phoneErrors[index]
-                            ? 'bg-red-50 border border-red-300 focus:ring-2 focus:ring-red-400'
-                            : 'bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c]'
-                        }`}
-                        value={phone || ''}
-                        onChange={(e) => handlePhoneChange(index, e.target.value)}
-                      />
-                      {editingStaff.phones.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removePhoneField(index)}
-                          className="p-3 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                    {/* Department Dropdown - Only for Admin when editing others */}
+                    {jobId === 3 && !isSelfEdit && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase ml-1">
+                          <Building2 size={14} className="text-[#a37e2c]" /> Department
+                        </label>
+                        <select
+                          className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                          value={editingStaff.DEP_ID || ''}
+                          onChange={(e) => handleDepartmentChange(e.target.value)}
                         >
-                          <Trash2Icon size={16} />
-                        </button>
+                          <option value="">Select Department</option>
+                          {departments.map(dep => (
+                            <option key={dep.DEP_ID} value={dep.DEP_ID}>{dep.DEP_NAME}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Role - For Admin and Branch Manager when editing others */}
+                    {(jobId === 3 || jobId === 4) && !isSelfEdit && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Role</label>
+                        <select
+                          className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                          value={editingStaff.JOB_TITLE || ''}
+                          onChange={(e) => {
+                            const newRole = e.target.value;
+                            setEditingStaff({...editingStaff, JOB_TITLE: newRole});
+                            const err = validateSalary(editingStaff.SALARY, newRole, salaryRanges);
+                            setEditFieldErrors({...editFieldErrors, SALARY: err});
+                            setEditTouched({...editTouched, SALARY: true});
+                          }}
+                        >
+                          {!editingStaff.DEP_ID ? (
+                            <option value="">Select department first</option>
+                          ) : editRoleOptions.length === 0 ? (
+                            <option value="">No roles available</option>
+                          ) : (
+                            editRoleOptions.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Salary - For Admin, Branch Manager, and Department Manager when editing others */}
+                    {(jobId === 3 || jobId === 4 || jobId === 1) && !isSelfEdit && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Salary ($)</label>
+                        <input
+                          type="number"
+                          min={salaryRanges[editingStaff.JOB_TITLE]?.min || 0}
+                          max={salaryRanges[editingStaff.JOB_TITLE]?.max || undefined}
+                          placeholder={salaryRanges[editingStaff.JOB_TITLE] ? `${salaryRanges[editingStaff.JOB_TITLE].min.toLocaleString()} - ${salaryRanges[editingStaff.JOB_TITLE].max.toLocaleString()}` : 'Enter salary'}
+                          className={getEditClass('SALARY')}
+                          value={editingStaff.SALARY || ''}
+                          onChange={(e) => handleEditChange('SALARY', e.target.value)}
+                          onBlur={() => handleEditBlur('SALARY')}
+                        />
+                        {!editFieldErrors.SALARY && salaryRanges[editingStaff.JOB_TITLE] && (
+                          <p className="text-[10px] text-gray-400 font-medium ml-1 flex items-center gap-1">
+                            <Briefcase size={10} className="text-[#a37e2c]" />
+                            Range for {stripJobPrefix(editingStaff.JOB_TITLE)}: <b>${salaryRanges[editingStaff.JOB_TITLE].min.toLocaleString()}</b> — <b>${salaryRanges[editingStaff.JOB_TITLE].max.toLocaleString()}</b>
+                          </p>
+                        )}
+                        {editFieldErrors.SALARY && editTouched.SALARY && (
+                          <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                            <AlertCircle size={12} /> {editFieldErrors.SALARY}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Supervisor - only Admin can change */}
+                    {jobId === 3 && editingStaff.JOB_ID !== undefined && !isSelfEdit && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Supervisor</label>
+                        <select
+                          className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none appearance-none font-semibold"
+                          value={editingStaff.SUPERVISOR_ID || ''}
+                          onChange={(e) => setEditingStaff({...editingStaff, SUPERVISOR_ID: e.target.value ? Number(e.target.value) : null})}
+                        >
+                          <option value="">{editingStaff.JOB_ID === 4 ? '(Branch Manager — No Supervisor)' : 'None (No Supervisor)'}</option>
+                          {staff
+                            .filter(s => {
+                              if (Number(s.EMPLOYEE_ID) === Number(editingStaff.EMPLOYEE_ID)) return false;
+                              if (Number(s.BRANCH_ID) !== Number(editingStaff.BRANCH_ID)) return false;
+                              const sJobId = Number(s.JOB_ID);
+                              const tJobId = Number(editingStaff.JOB_ID);
+                              return canSupervise(sJobId, tJobId);
+                            })
+                            .map(s => (
+                              <option key={s.EMPLOYEE_ID} value={s.EMPLOYEE_ID}>
+                                {s.FIRST_NAME}{s.MIDDLE_NAME ? ' ' + s.MIDDLE_NAME : ''} {s.LAST_NAME} ({stripJobPrefix(s.JOB_TITLE)})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Username {jobId !== 3 && '(Read-Only)'}</label>
+                      {jobId === 3 ? (
+                        <>
+                          <input
+                            className={`w-full px-4 py-3 rounded-xl outline-none focus:ring-2 transition-all font-semibold ${
+                              usernameError
+                                ? 'bg-red-50 border border-red-300 focus:ring-red-400'
+                                : 'bg-gray-50 border border-gray-200 focus:ring-[#a37e2c]'
+                            }`}
+                            value={editingStaff.USERNAME || ''}
+                            onChange={(e) => {
+                              setEditingStaff({...editingStaff, USERNAME: e.target.value});
+                              setUsernameError('');
+                            }}
+                            onBlur={(e) => checkUsername(e.target.value)}
+                          />
+                          {usernameError && (
+                            <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {usernameError}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <input
+                          className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 font-semibold text-gray-500 cursor-not-allowed"
+                          value={editingStaff.USERNAME || ''}
+                          disabled
+                        />
                       )}
                     </div>
-                    {phoneErrors[index] && (
-                      <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                        <AlertCircle size={12} /> {phoneErrors[index]}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Change Password (Optional)</label>
+                      <input
+                        type="password"
+                        placeholder="Leave blank to keep current password"
+                        className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                        value={editingStaff.password || ''}
+                        onChange={(e) => setEditingStaff({...editingStaff, password: e.target.value})}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">
+                          Phone Numbers (Max 3)
+                        </label>
+                        {editingStaff.phones.length < 3 && (
+                          <button
+                            type="button"
+                            onClick={addPhoneField}
+                            className="text-xs font-bold text-[#004a99] hover:underline flex items-center gap-1"
+                          >
+                            <Plus size={14} /> Add
+                          </button>
+                        )}
+                      </div>
+
+                      {editingStaff.phones.map((phone, index) => (
+                        <div key={index} className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder={`Phone ${index + 1} (e.g. 01012345678)`}
+                              className={`flex-1 px-4 py-3 rounded-xl outline-none font-semibold transition-all ${
+                                phoneErrors[index]
+                                  ? 'bg-red-50 border border-red-300 focus:ring-2 focus:ring-red-400'
+                                  : 'bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c]'
+                              }`}
+                              value={phone || ''}
+                              onChange={(e) => handlePhoneChange(index, e.target.value)}
+                            />
+                            {editingStaff.phones.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removePhoneField(index)}
+                                className="p-3 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                              >
+                                <Trash2Icon size={16} />
+                              </button>
+                            )}
+                          </div>
+                          {phoneErrors[index] && (
+                            <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> {phoneErrors[index]}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             <div className="flex gap-4 mt-8 pt-6 border-t border-gray-50">

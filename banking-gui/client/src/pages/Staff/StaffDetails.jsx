@@ -7,14 +7,16 @@ import {
 import axios from 'axios';
 import euiLogo from '../../assets/EUI-Cropped.jpg';
 import { validateEgyptianPhone, validatePhones, validateEmail, validateName, validateSalary } from '../../utils/validation.js';
-import { getJobDropdownOptions, stripJobPrefix, getPrefixForDepartment } from '../../utils/jobMappings.js';
+import { getJobDropdownOptions, getJobDropdownOptionsByPermission, stripJobPrefix, getPrefixForDepartment, canSupervise } from '../../utils/jobMappings.js';
 
 export default function StaffDetails() {
   const navigate = useNavigate();
   const { employeeId } = useParams();
   const [staff, setStaff] = useState(null);
+  const [staffList, setStaffList] = useState([]);
   const [dependants, setDependants] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [salaryRanges, setSalaryRanges] = useState({});
   const [allJobs, setAllJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,6 +24,62 @@ export default function StaffDetails() {
 
   const loggedInStaff = JSON.parse(localStorage.getItem('staff') || '{}');
   const isSelfEdit = Number(loggedInStaff.EMPLOYEE_ID) === Number(employeeId);
+  
+  const canEditStaff = (targetStaff) => {
+    const jobId = loggedInStaff.JOB_ID;
+    if (jobId === 2) return false; // Tellers cannot edit anyone
+    if (jobId === 3) return true; // Admin can view and edit everyone
+    
+    const isSelfEdit = targetStaff.EMPLOYEE_ID === loggedInStaff.EMPLOYEE_ID;
+    const targetJobId = targetStaff.JOB_ID || targetStaff.job_id;
+    const targetDepId = targetStaff.DEP_ID || targetStaff.dep_id;
+    
+    // Branch Manager (4): can edit dept managers (1) and tellers (2) in their branch
+    if (jobId === 4) {
+      if (isSelfEdit) return true;
+      if (targetStaff.BRANCH_ID !== loggedInStaff.BRANCH_ID) return false;
+      if (targetJobId === 1 || targetJobId === 2) return true;
+      return false;
+    }
+    
+    // Department Manager (1): can only edit tellers (2) in their department and branch
+    if (jobId === 1) {
+      if (isSelfEdit) return true;
+      if (targetStaff.BRANCH_ID !== loggedInStaff.BRANCH_ID) return false;
+      if (targetDepId !== loggedInStaff.DEP_ID) return false;
+      if (targetJobId === 2) return true;
+      return false;
+    }
+    
+    return false;
+  };
+
+  const canAddDependant = (targetStaff) => {
+    const jobId = loggedInStaff.JOB_ID;
+    if (jobId === 3) return true; // Admin can add dependants to anyone
+    if (jobId === 2) return false; // Tellers cannot add dependants
+    
+    // Branch Manager (4): can add dependants for dept managers (1) and tellers (2) in their branch
+    if (jobId === 4) {
+      const targetJobId = targetStaff.JOB_ID || targetStaff.job_id;
+      if (targetStaff.BRANCH_ID !== loggedInStaff.BRANCH_ID) return false;
+      if (targetJobId === 1 || targetJobId === 2) return true;
+      return false;
+    }
+    
+    // Department Manager (1): can add dependants ONLY to tellers (JOB_ID=2) in their department and branch
+    if (jobId === 1) {
+      const targetJobId = targetStaff.JOB_ID || targetStaff.job_id;
+      const targetDepId = targetStaff.DEP_ID || targetStaff.dep_id;
+      if (targetJobId === 2 && targetDepId === loggedInStaff.DEP_ID && targetStaff.BRANCH_ID === loggedInStaff.BRANCH_ID) return true;
+      return false;
+    }
+    
+    return false;
+  };
+
+  const isITAdmin = loggedInStaff.JOB_ID === 3;
+  const isLimitedManager = loggedInStaff.JOB_ID === 1 || loggedInStaff.JOB_ID === 4;
 
   // Edit panel state - slides from right
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
@@ -35,25 +93,34 @@ export default function StaffDetails() {
 
   // Dependant management
   const [showAddDependant, setShowAddDependant] = useState(false);
+  const [editingDependant, setEditingDependant] = useState(null);
   const [dependantForm, setDependantForm] = useState({
     nationalId: '', firstName: '', middleName: '', lastName: '', relationship: 'Child'
   });
   const [dependantError, setDependantError] = useState('');
   const [isAddingDependant, setIsAddingDependant] = useState(false);
 
+  // Username inline validation
+  const [usernameError, setUsernameError] = useState('');
+
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [staffRes, depsRes, jobsRes, depRes] = await Promise.all([
+        const [staffRes, depsRes, jobsRes, branchRes, staffListRes, dependantRes] = await Promise.all([
           axios.get(`http://localhost:3000/staff/${employeeId}/details`),
-          axios.get(`http://localhost:3000/staff/${employeeId}/dependants`),
+          axios.get('http://localhost:3000/departments'),
           axios.get('http://localhost:3000/jobs'),
-          axios.get('http://localhost:3000/departments')
+          axios.get('http://localhost:3000/branches'),
+          axios.get('http://localhost:3000/staff', {
+            params: { supervisorId: loggedInStaff.EMPLOYEE_ID, jobId: loggedInStaff.JOB_ID, branchId: loggedInStaff.BRANCH_ID }
+          }),
+          axios.get(`http://localhost:3000/staff/${employeeId}/dependants`)
         ]);
 
         setStaff(staffRes.data);
-        setDependants(depsRes.data);
+        setStaffList(staffListRes.data);
+        setDependants(dependantRes.data);
 
         const ranges = {};
         jobsRes.data.forEach(job => {
@@ -61,7 +128,8 @@ export default function StaffDetails() {
         });
         setSalaryRanges(ranges);
         setAllJobs(jobsRes.data);
-        setDepartments(depRes.data);
+        setDepartments(depsRes.data);
+        setBranches(branchRes.data);
       } catch (err) {
         setError(err.response?.data?.message || 'Failed to load staff details');
         console.error('Failed to load staff details:', err);
@@ -73,14 +141,15 @@ export default function StaffDetails() {
     if (employeeId) fetchData();
   }, [employeeId]);
 
-  // Build dynamic role dropdown options based on selected department
+  // Build dynamic role dropdown options based on selected department AND user permissions
+  const loggedInJobId = loggedInStaff.JOB_ID || null;
   const editRoleOptions = editForm && editForm.DEP_ID
-    ? getJobDropdownOptions(allJobs, editForm.DEP_ID)
+    ? getJobDropdownOptionsByPermission(allJobs, loggedInJobId, editForm.DEP_ID)
     : [];
 
   const handleDepartmentChange = (depId) => {
     const id = depId ? Number(depId) : null;
-    const newRoleOptions = id ? getJobDropdownOptions(allJobs, id) : [];
+    const newRoleOptions = id ? getJobDropdownOptionsByPermission(allJobs, loggedInJobId, id) : [];
     let newJobTitle = editForm.JOB_TITLE;
 
     if (newRoleOptions.length > 0) {
@@ -131,10 +200,15 @@ export default function StaffDetails() {
   };
 
   const openEditPanel = () => {
+    if (!canEditStaff(staff)) {
+      alert('You do not have permission to edit this staff member.');
+      return;
+    }
     setEditFieldErrors({});
     setEditTouched({});
     setEditSaveError('');
     setEditForm({ ...staff });
+    setUsernameError('');
     setEditPhones(staff.PHONES && staff.PHONES.length > 0 ? [...staff.PHONES] : ['']);
     setEditPhoneErrors(new Array(staff.PHONES && staff.PHONES.length > 0 ? staff.PHONES.length : 1).fill(''));
     setIsEditPanelOpen(true);
@@ -200,13 +274,18 @@ export default function StaffDetails() {
       const validPhones = editPhones.filter(phone => phone && phone.trim() !== '');
       await axios.put(`http://localhost:3000/staff/${employeeId}`, {
         firstName: editForm.FIRST_NAME,
+        middleName: editForm.MIDDLE_NAME || null,
         lastName: editForm.LAST_NAME,
         email: editForm.EMAIL,
         role: editForm.JOB_TITLE,
         salary: editForm.SALARY,
+        username: editForm.USERNAME || null,
+        supervisorId: editForm.SUPERVISOR_ID !== undefined ? editForm.SUPERVISOR_ID : undefined,
         password: editForm.password || null,
         phones: validPhones,
-        depId: editForm.DEP_ID || null
+        depId: editForm.DEP_ID || null,
+        branchId: editForm.BRANCH_ID || null,
+        requesterId: loggedInStaff.EMPLOYEE_ID || null
       });
 
       // Refresh staff details
@@ -221,15 +300,24 @@ export default function StaffDetails() {
   };
 
   // Dependant management
-  const handleAddDependant = async (e) => {
+  const handleEditDependant = (dep) => {
+    setDependantForm({
+      nationalId: dep.NATIONAL_ID || '',
+      firstName: dep.FIRST_NAME || '',
+      middleName: dep.MIDDLE_NAME || '',
+      lastName: dep.LAST_NAME || '',
+      relationship: dep.RELATIONSHIP || 'Child'
+    });
+    setShowAddDependant(true);
+    setEditingDependant(dep);
+    setDependantError('');
+  };
+
+  const handleSaveDependant = async (e) => {
     e.preventDefault();
     setDependantError('');
 
-    if (!dependantForm.nationalId.trim()) {
-      setDependantError('National ID is required.');
-      return;
-    }
-    if (dependantForm.nationalId.trim().length !== 14) {
+    if (!dependantForm.nationalId || dependantForm.nationalId.trim().length !== 14 || !/^\d{14}$/.test(dependantForm.nationalId.trim())) {
       setDependantError('National ID must be exactly 14 digits.');
       return;
     }
@@ -246,27 +334,40 @@ export default function StaffDetails() {
       return;
     }
 
-    if (dependants.length >= 4) {
+    if (!editingDependant && dependants.length >= 4) {
       setDependantError('Maximum of 4 dependants allowed.');
       return;
     }
 
     setIsAddingDependant(true);
     try {
-      await axios.post(`http://localhost:3000/staff/${employeeId}/dependants`, {
-        nationalId: dependantForm.nationalId.trim(),
-        firstName: dependantForm.firstName.trim(),
-        middleName: dependantForm.middleName.trim() || null,
-        lastName: dependantForm.lastName.trim(),
-        relationship: dependantForm.relationship
-      });
+      if (editingDependant) {
+        await axios.put(`http://localhost:3000/staff/${employeeId}/dependants/${editingDependant.NATIONAL_ID}`, {
+          nationalId: dependantForm.nationalId.trim(),
+          firstName: dependantForm.firstName.trim(),
+          middleName: dependantForm.middleName.trim() || null,
+          lastName: dependantForm.lastName.trim(),
+          relationship: dependantForm.relationship,
+          requesterId: loggedInStaff.EMPLOYEE_ID
+        });
+      } else {
+        await axios.post(`http://localhost:3000/staff/${employeeId}/dependants`, {
+          nationalId: dependantForm.nationalId.trim(),
+          firstName: dependantForm.firstName.trim(),
+          middleName: dependantForm.middleName.trim() || null,
+          lastName: dependantForm.lastName.trim(),
+          relationship: dependantForm.relationship,
+          requesterId: loggedInStaff.EMPLOYEE_ID
+        });
+      }
 
       const depsRes = await axios.get(`http://localhost:3000/staff/${employeeId}/dependants`);
       setDependants(depsRes.data);
       setShowAddDependant(false);
+      setEditingDependant(null);
       setDependantForm({ nationalId: '', firstName: '', middleName: '', lastName: '', relationship: 'Child' });
     } catch (err) {
-      setDependantError(err.response?.data?.message || 'Failed to add dependant.');
+      setDependantError(err.response?.data?.message || 'Failed to save dependant.');
     } finally {
       setIsAddingDependant(false);
     }
@@ -274,11 +375,33 @@ export default function StaffDetails() {
 
   const handleRemoveDependant = async (nationalId) => {
     try {
-      await axios.delete(`http://localhost:3000/staff/${employeeId}/dependants/${nationalId}`);
+      await axios.delete(`http://localhost:3000/staff/${employeeId}/dependants/${nationalId}`, {
+        data: { requesterId: loggedInStaff.EMPLOYEE_ID }
+      });
       const depsRes = await axios.get(`http://localhost:3000/staff/${employeeId}/dependants`);
       setDependants(depsRes.data);
     } catch (err) {
       console.error('Failed to remove dependant:', err);
+    }
+  };
+
+  // Username inline availability check
+  const checkUsername = async (username) => {
+    if (!username || username.trim().length < 3) {
+      setUsernameError('');
+      return;
+    }
+    try {
+      const res = await axios.get('http://localhost:3000/staff/check-username', {
+        params: { username: username.trim(), excludeId: employeeId }
+      });
+      if (!res.data.available) {
+        setUsernameError('This username is already taken.');
+      } else {
+        setUsernameError('');
+      }
+    } catch {
+      setUsernameError('');
     }
   };
 
@@ -336,12 +459,14 @@ export default function StaffDetails() {
           <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
           <h1 className="text-lg font-bold text-[#004a99]">Staff Profile</h1>
         </div>
-        <button
-          onClick={openEditPanel}
-          className="flex items-center gap-2 px-6 py-2.5 bg-[#004a99] text-white rounded-2xl font-bold text-sm shadow-lg hover:bg-[#003d7a] transition-all"
-        >
-          <Edit size={16} /> Edit Staff
-        </button>
+        {canEditStaff(staff) && (
+          <button
+            onClick={openEditPanel}
+            className="flex items-center gap-2 px-6 py-2.5 bg-[#004a99] text-white rounded-2xl font-bold text-sm shadow-lg hover:bg-[#003d7a] transition-all"
+          >
+            <Edit size={16} /> Edit Staff
+          </button>
+        )}
       </nav>
 
       <main className="max-w-4xl mx-auto p-8">
@@ -430,7 +555,7 @@ export default function StaffDetails() {
               <h3 className="text-lg font-bold text-gray-800">Dependants</h3>
               <span className="text-xs text-gray-400 font-medium">({dependants.length}/4)</span>
             </div>
-            {dependants.length < 4 && (
+            {dependants.length < 4 && canAddDependant(staff) && (
               <button
                 onClick={() => setShowAddDependant(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-50 text-[#004a99] rounded-xl hover:bg-blue-50 font-bold text-xs transition-all"
@@ -460,13 +585,24 @@ export default function StaffDetails() {
                         <p className="text-xs text-gray-400 font-medium">{dep.RELATIONSHIP}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleRemoveDependant(dep.NATIONAL_ID)}
-                      className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                      title="Remove dependant"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {canAddDependant(staff) && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleEditDependant(dep)}
+                          className="p-2 text-gray-300 hover:text-[#004a99] hover:bg-blue-50 rounded-lg transition-all"
+                          title="Edit dependant"
+                        >
+                          <Edit size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleRemoveDependant(dep.NATIONAL_ID)}
+                          className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                          title="Remove dependant"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <p className="text-[10px] text-gray-300 font-medium mt-2 ml-0.5">National ID: {dep.NATIONAL_ID}</p>
                 </div>
@@ -478,9 +614,9 @@ export default function StaffDetails() {
           {showAddDependant && (
             <div className="mt-6 bg-blue-50 rounded-2xl p-6 border border-blue-100">
               <h4 className="font-bold text-gray-800 text-sm mb-4 flex items-center gap-2">
-                <Plus size={16} className="text-[#004a99]" /> New Dependant
+                <Plus size={16} className="text-[#004a99]" /> {editingDependant ? 'Edit Dependant' : 'New Dependant'}
               </h4>
-              <form onSubmit={handleAddDependant} className="space-y-4">
+              <form onSubmit={handleSaveDependant} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">First Name *</label>
@@ -553,11 +689,11 @@ export default function StaffDetails() {
                     disabled={isAddingDependant}
                     className="px-6 py-3 bg-[#004a99] text-white rounded-2xl font-bold text-sm hover:bg-[#003d7a] transition-all disabled:opacity-50 flex items-center gap-2"
                   >
-                    {isAddingDependant ? 'Adding...' : <><Plus size={16} /> Add Dependant</>}
+                    {isAddingDependant ? 'Saving...' : editingDependant ? <><Save size={16} /> Save Changes</> : <><Plus size={16} /> Add Dependant</>}
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setShowAddDependant(false); setDependantError(''); }}
+                    onClick={() => { setShowAddDependant(false); setEditingDependant(null); setDependantError(''); setDependantForm({ nationalId: '', firstName: '', middleName: '', lastName: '', relationship: 'Child' }); }}
                     className="px-6 py-3 bg-white text-gray-500 rounded-2xl font-bold text-sm hover:bg-gray-100 transition-all"
                   >
                     Cancel
@@ -597,81 +733,152 @@ export default function StaffDetails() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">First Name</label>
-                  <input
-                    className={getEditClass('FIRST_NAME')}
-                    value={editForm.FIRST_NAME || ''}
-                    onChange={(e) => handleEditChange('FIRST_NAME', e.target.value)}
-                    onBlur={() => handleEditBlur('FIRST_NAME')}
-                  />
-                  {editFieldErrors.FIRST_NAME && editTouched.FIRST_NAME && (
-                    <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                      <AlertCircle size={12} /> {editFieldErrors.FIRST_NAME}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Last Name</label>
-                  <input
-                    className={getEditClass('LAST_NAME')}
-                    value={editForm.LAST_NAME || ''}
-                    onChange={(e) => handleEditChange('LAST_NAME', e.target.value)}
-                    onBlur={() => handleEditBlur('LAST_NAME')}
-                  />
-                  {editFieldErrors.LAST_NAME && editTouched.LAST_NAME && (
-                    <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                      <AlertCircle size={12} /> {editFieldErrors.LAST_NAME}
-                    </p>
-                  )}
-                </div>
-              </div>
+              {(loggedInStaff.JOB_ID === 3 || !isSelfEdit) && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">First Name</label>
+                      <input
+                        className={getEditClass('FIRST_NAME')}
+                        value={editForm.FIRST_NAME || ''}
+                        onChange={(e) => handleEditChange('FIRST_NAME', e.target.value)}
+                        onBlur={() => handleEditBlur('FIRST_NAME')}
+                      />
+                      {editFieldErrors.FIRST_NAME && editTouched.FIRST_NAME && (
+                        <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                          <AlertCircle size={12} /> {editFieldErrors.FIRST_NAME}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Middle Name</label>
+                      <input
+                        className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                        value={editForm.MIDDLE_NAME || ''}
+                        onChange={(e) => setEditForm({...editForm, MIDDLE_NAME: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Last Name</label>
+                      <input
+                        className={getEditClass('LAST_NAME')}
+                        value={editForm.LAST_NAME || ''}
+                        onChange={(e) => handleEditChange('LAST_NAME', e.target.value)}
+                        onBlur={() => handleEditBlur('LAST_NAME')}
+                      />
+                      {editFieldErrors.LAST_NAME && editTouched.LAST_NAME && (
+                        <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                          <AlertCircle size={12} /> {editFieldErrors.LAST_NAME}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Email</label>
+                      <input
+                        className={getEditClass('EMAIL')}
+                        value={editForm.EMAIL || ''}
+                        onChange={(e) => handleEditChange('EMAIL', e.target.value)}
+                        onBlur={() => handleEditBlur('EMAIL')}
+                      />
+                      {editFieldErrors.EMAIL && editTouched.EMAIL && (
+                        <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                          <AlertCircle size={12} /> {editFieldErrors.EMAIL}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Email</label>
-                <input
-                  className={getEditClass('EMAIL')}
-                  value={editForm.EMAIL || ''}
-                  onChange={(e) => handleEditChange('EMAIL', e.target.value)}
-                  onBlur={() => handleEditBlur('EMAIL')}
-                />
-                {editFieldErrors.EMAIL && editTouched.EMAIL && (
-                  <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
-                    <AlertCircle size={12} /> {editFieldErrors.EMAIL}
-                  </p>
-                )}
-              </div>
+              {/* Self-edit read-only name/email info for non-admin */}
+              {loggedInStaff.JOB_ID !== 3 && isSelfEdit && (
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                  <div className="grid grid-cols-2 gap-4 mb-3">
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase">Name</p>
+                      <p className="font-semibold text-gray-700">{editForm.FIRST_NAME} {editForm.MIDDLE_NAME ? editForm.MIDDLE_NAME + ' ' : ''}{editForm.LAST_NAME}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase">Email</p>
+                      <p className="font-semibold text-gray-700">{editForm.EMAIL}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 italic">Contact an administrator to change your name or email.</p>
+                </div>
+              )}
 
               {isSelfEdit && (
                 <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-amber-700 text-sm flex items-start gap-3">
                   <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="font-bold">Editing Your Own Profile</p>
-                    <p className="text-amber-600 text-xs mt-1">Role, Department, and Salary changes are locked for self-editing. Contact an administrator to change your position or compensation.</p>
+                    <p className="text-amber-600 text-xs mt-1">{loggedInStaff.JOB_ID === 3
+                      ? 'You can edit your name, email, phone numbers, and password. Role, Department, and Salary changes are locked for self-editing.'
+                      : 'Role, Department, and Salary changes are locked for self-editing. Contact an administrator to change your position or compensation.'}</p>
                   </div>
                 </div>
               )}
 
-              {/* Department Dropdown */}
-              <div className="flex flex-col gap-1.5">
-                <label className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase ml-1">
-                  <Building2 size={14} className="text-[#a37e2c]" /> Department
-                </label>
-                <select
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
-                  value={editForm.DEP_ID || ''}
-                  onChange={(e) => handleDepartmentChange(e.target.value)}
-                  disabled={isSelfEdit}
-                >
-                  <option value="">Select Department</option>
-                  {departments.map(dep => (
-                    <option key={dep.DEP_ID} value={dep.DEP_ID}>{dep.DEP_NAME}</option>
-                  ))}
-                </select>
-              </div>
+              {/* Department/Role/Salary - Read-only for dept managers who cannot change these */}
+              {loggedInStaff.JOB_ID === 1 && !isSelfEdit && (
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                  <p className="text-xs text-gray-400 font-bold uppercase mb-2">Staff Information (Read-Only)</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase">Role</p>
+                      <p className="font-semibold text-gray-700">{stripJobPrefix(editForm.JOB_TITLE) || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase">Department</p>
+                      <p className="font-semibold text-gray-700">{editForm.DEP_NAME || 'N/A'}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2 italic">Contact your branch manager to change role or department.</p>
+                </div>
+              )}
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Department Dropdown - Only for Admin when editing others */}
+              {loggedInStaff.JOB_ID === 3 && !isSelfEdit && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase ml-1">
+                    <Building2 size={14} className="text-[#a37e2c]" /> Department
+                  </label>
+                  <select
+                    className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                    value={editForm.DEP_ID || ''}
+                    onChange={(e) => handleDepartmentChange(e.target.value)}
+                  >
+                    <option value="">Select Department</option>
+                    {departments.map(dep => (
+                      <option key={dep.DEP_ID} value={dep.DEP_ID}>{dep.DEP_NAME}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Branch Dropdown - Only for Admin */}
+              {loggedInStaff.JOB_ID === 3 && !isSelfEdit && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase ml-1">
+                    <MapPin size={14} className="text-[#a37e2c]" /> Branch
+                  </label>
+                  <select
+                    className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none font-semibold"
+                    value={editForm.BRANCH_ID || ''}
+                    onChange={(e) => setEditForm({...editForm, BRANCH_ID: Number(e.target.value)})}
+                  >
+                    <option value="">Select Branch</option>
+                    {branches.map(branch => (
+                      <option key={branch.BRANCH_ID} value={branch.BRANCH_ID}>{branch.BRANCH_NAME}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Role - For Admin and Branch Manager when editing others */}
+              {(loggedInStaff.JOB_ID === 3 || loggedInStaff.JOB_ID === 4) && !isSelfEdit && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Role</label>
                   <select
@@ -684,7 +891,6 @@ export default function StaffDetails() {
                       setEditFieldErrors({...editFieldErrors, SALARY: err});
                       setEditTouched({...editTouched, SALARY: true});
                     }}
-                    disabled={isSelfEdit}
                   >
                     {!editForm.DEP_ID ? (
                       <option value="">Select department first</option>
@@ -697,7 +903,10 @@ export default function StaffDetails() {
                     )}
                   </select>
                 </div>
+              )}
 
+              {/* Salary - For Admin, Branch Manager, and Department Manager when editing others */}
+              {(loggedInStaff.JOB_ID === 3 || loggedInStaff.JOB_ID === 4 || loggedInStaff.JOB_ID === 1) && !isSelfEdit && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Salary ($)</label>
                   <input
@@ -709,7 +918,6 @@ export default function StaffDetails() {
                     value={editForm.SALARY || ''}
                     onChange={(e) => handleEditChange('SALARY', e.target.value)}
                     onBlur={() => handleEditBlur('SALARY')}
-                    disabled={isSelfEdit}
                   />
                   {!editFieldErrors.SALARY && salaryRanges[editForm.JOB_TITLE] && (
                     <p className="text-[10px] text-gray-400 font-medium ml-1">
@@ -722,15 +930,65 @@ export default function StaffDetails() {
                     </p>
                   )}
                 </div>
-              </div>
+              )}
+
+              {/* Supervisor - only Admin can change */}
+              {loggedInStaff.JOB_ID === 3 && !isSelfEdit && editForm.JOB_ID !== undefined && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Supervisor</label>
+                  <select
+                    className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-[#a37e2c] outline-none appearance-none font-semibold"
+                    value={editForm.SUPERVISOR_ID || ''}
+                    onChange={(e) => setEditForm({...editForm, SUPERVISOR_ID: e.target.value ? Number(e.target.value) : null})}
+                  >
+                    <option value="">{editForm.JOB_ID === 4 ? '(Branch Manager — No Supervisor)' : 'None (No Supervisor)'}</option>
+                    {staffList
+                      .filter(s => {
+                        if (Number(s.EMPLOYEE_ID) === Number(employeeId)) return false;
+                        if (Number(s.BRANCH_ID) !== Number(editForm.BRANCH_ID)) return false;
+                        const sJobId = Number(s.JOB_ID);
+                        const tJobId = Number(editForm.JOB_ID);
+                        return canSupervise(sJobId, tJobId);
+                      })
+                      .map(s => (
+                        <option key={s.EMPLOYEE_ID} value={s.EMPLOYEE_ID}>
+                          {s.FIRST_NAME}{s.MIDDLE_NAME ? ' ' + s.MIDDLE_NAME : ''} {s.LAST_NAME} ({stripJobPrefix(s.JOB_TITLE)})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Username (Read-Only)</label>
-                <input
-                  className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 font-semibold text-gray-500 cursor-not-allowed"
-                  value={editForm.USERNAME || ''}
-                  disabled
-                />
+                <label className="text-[10px] text-gray-400 font-bold uppercase ml-1">Username {loggedInStaff.JOB_ID !== 3 && '(Read-Only)'}</label>
+                {loggedInStaff.JOB_ID === 3 && !isSelfEdit ? (
+                  <>
+                    <input
+                      className={`w-full px-4 py-3 rounded-xl outline-none focus:ring-2 transition-all font-semibold ${
+                        usernameError
+                          ? 'bg-red-50 border border-red-300 focus:ring-red-400'
+                          : 'bg-gray-50 border border-gray-200 focus:ring-[#a37e2c]'
+                      }`}
+                      value={editForm.USERNAME || ''}
+                      onChange={(e) => {
+                        setEditForm({...editForm, USERNAME: e.target.value});
+                        setUsernameError('');
+                      }}
+                      onBlur={(e) => checkUsername(e.target.value)}
+                    />
+                    {usernameError && (
+                      <p className="text-xs text-red-500 font-medium ml-1 flex items-center gap-1">
+                        <AlertCircle size={12} /> {usernameError}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <input
+                    className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 font-semibold text-gray-500 cursor-not-allowed"
+                    value={editForm.USERNAME || ''}
+                    disabled
+                  />
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">

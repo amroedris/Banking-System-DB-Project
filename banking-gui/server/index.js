@@ -1475,7 +1475,7 @@ app.put("/approvals/card/:cardId", async (req, res) => {
 
 // GET ALL STAFF (optionally filtered by supervisorId)
 app.get("/staff", async (req, res) => {
-  const { supervisorId, departmentName, jobTitle } = req.query;
+  const { supervisorId, departmentName, jobTitle, branchId } = req.query;
   let connection;
 
   try {
@@ -1498,9 +1498,9 @@ app.get("/staff", async (req, res) => {
 
     // PERMISSION LOGIC:
     // JOB_ID = 3 (IT_System_Administrator): God view — see all staff
-    // JOB_ID = 1 (RB_Department_Manager): see their subordinates + themselves
+    // JOB_ID = 1 (RB_Department_Manager): see everyone in their department
     // JOB_ID = 2 (RB_Teller): return empty array — page template renders access denied UI
-    // JOB_ID = 4 (RB_Branch_Manager): see only staff in their branch
+    // JOB_ID = 4 (RB_Branch_Manager): see staff in their branch but NOT admins/branch managers
 
     // Teller: return empty array instead of 403
     if (requesterJobId === 2) {
@@ -1511,6 +1511,7 @@ app.get("/staff", async (req, res) => {
       SELECT
         e.employee_id,
         e.first_name,
+        e.middle_name,
         e.last_name,
         e.email,
         e.supervisor_id,
@@ -1531,23 +1532,24 @@ app.get("/staff", async (req, res) => {
     const conditions = [];
     const params = {};
 
-    // Department Supervisor (JOB_ID = 1): only their subordinates + themselves
+    // Department Supervisor (JOB_ID = 1): people they supervise OR same department, limited to their branch
     if (requesterJobId === 1) {
-      const supervisorCheckResult = await connection.execute(
-        `SELECT COUNT(*) AS sup_count FROM employees WHERE supervisor_id = :empId`,
+      const requesterDepResult = await connection.execute(
+        `SELECT dep_id, branch_id FROM employees WHERE employee_id = :empId`,
         { empId: supervisorId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
-
-      const supervisorCount = supervisorCheckResult.rows[0].SUP_COUNT;
-      if (supervisorCount === 0) {
-        return res.status(403).json({ message: "You don't supervise any employees" });
+      if (requesterDepResult.rows.length > 0) {
+        conditions.push(`e.branch_id = :branchId AND (e.supervisor_id = :supervisorId OR e.dep_id = :depId)`);
+        params.branchId = requesterDepResult.rows[0].BRANCH_ID;
+        params.depId = requesterDepResult.rows[0].DEP_ID;
+        params.supervisorId = supervisorId;
+      } else {
+        conditions.push(`e.employee_id = :supervisorId`);
+        params.supervisorId = supervisorId;
       }
-
-      conditions.push(`(e.supervisor_id = :supervisorId OR e.employee_id = :supervisorId)`);
-      params.supervisorId = supervisorId;
     }
-    // Branch Manager (JOB_ID = 4): only staff in their branch
+    // Branch Manager (JOB_ID = 4): all staff in their branch
     else if (requesterJobId === 4) {
       conditions.push(`e.branch_id = :branchId`);
       params.branchId = requesterBranchId;
@@ -1562,6 +1564,10 @@ app.get("/staff", async (req, res) => {
       if (jobTitle) {
         conditions.push(`LOWER(j.job_title) LIKE LOWER(:jobTitlePattern)`);
         params.jobTitlePattern = `%${jobTitle}%`;
+      }
+      if (branchId) {
+        conditions.push(`e.branch_id = :branchIdFilter`);
+        params.branchIdFilter = branchId;
       }
     }
 
@@ -1651,14 +1657,114 @@ app.get("/departments", async (req, res) => {
   }
 });
 
+// GET ALL BRANCHES
+app.get("/branches", async (req, res) => {
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    const result = await connection.execute(
+      `SELECT DISTINCT branch_id, branch_id as branch_name FROM employees WHERE branch_id IS NOT NULL ORDER BY branch_id`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const branches = result.rows.map(r => ({
+      BRANCH_ID: r.BRANCH_ID,
+      BRANCH_NAME: `Branch ${r.BRANCH_ID}`
+    }));
+    res.json(branches);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 
 // CREATE NEW STAFF MEMBER
 app.post("/staff", async (req, res) => {
-  const { firstName, middleName, lastName, email, salary, username, password, role, depId, supervisorId, phones } = req.body;
+  const { firstName, middleName, lastName, email, salary, username, password, role, depId, supervisorId, phones, requesterId } = req.body;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
+
+    // 0. Get requester info for permission checks
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    if (requesterId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+      }
+    }
+
+    // 0b. PERMISSION CHECK: Who can create what
+    // JOB_ID = 3 (IT_System_Administrator): Can create any role
+    // JOB_ID = 1 (RB_Department_Manager): Can create Tellers (2) in their department
+    // JOB_ID = 4 (RB_Branch_Manager): Can create Tellers (2) in their branch
+    // JOB_ID = 2 (RB_Teller): Cannot create anyone
+
+    const roleResult = await connection.execute(
+      `SELECT job_id FROM jobs WHERE job_title = :role`,
+      { role: role || 'RB_Teller' },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (roleResult.rows.length === 0) {
+      return res.status(400).json({ success: false, message: `Role "${role}" not found in Jobs table.` });
+    }
+
+    const targetJobId = roleResult.rows[0].JOB_ID;
+
+    // Teller (JOB_ID=2) cannot create anyone
+    if (requesterJobId === 2) {
+      return res.status(403).json({ success: false, message: "Tellers cannot create staff members." });
+    }
+
+    // Branch Manager (JOB_ID=4) can ONLY create Tellers (job_id 2) - cannot create Department Manager or IT roles
+    const roleStartsWithIT = role && role.startsWith('IT_');
+    if (requesterJobId === 4) {
+      if (targetJobId !== 2 || roleStartsWithIT) {
+        return res.status(403).json({ success: false, message: "Branch Managers can only create Teller positions." });
+      }
+    }
+
+    // Department Manager (JOB_ID=1) - can create Tellers in their department
+    if (requesterJobId === 1) {
+      if (targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "Department Managers can only create Teller positions." });
+      }
+    }
+
+    // Duplicate email check
+    if (email) {
+      const emailCheck = await connection.execute(
+        `SELECT employee_id FROM employees WHERE LOWER(email) = LOWER(:email)`,
+        { email },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (emailCheck.rows.length > 0) {
+        return res.status(400).json({ success: false, message: "Email is already in use by another employee." });
+      }
+    }
+
+    // Duplicate username check
+    if (username) {
+      const userCheck = await connection.execute(
+        `SELECT employee_id FROM employees WHERE LOWER(username) = LOWER(:username)`,
+        { username },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (userCheck.rows.length > 0) {
+        return res.status(400).json({ success: false, message: "Username is already taken." });
+      }
+    }
 
     // 1. Resolve role name AND fetch salary constraints
     const jobResult = await connection.execute(
@@ -1701,9 +1807,22 @@ app.post("/staff", async (req, res) => {
       departmentId = 10;
     }
 
+    // 5. Inherit branch_id from supervisor or requester
+    let branchId = requesterBranchId || 101;
+    if (supervisorId) {
+      const branchResult = await connection.execute(
+        `SELECT branch_id FROM employees WHERE employee_id = :empId`,
+        { empId: supervisorId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (branchResult.rows.length > 0 && branchResult.rows[0].BRANCH_ID) {
+        branchId = branchResult.rows[0].BRANCH_ID;
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 5. Insert the employee
+    // 6. Insert the employee
     await connection.execute(
       `INSERT INTO employees (
         employee_id, first_name, middle_name, last_name, email,
@@ -1712,7 +1831,7 @@ app.post("/staff", async (req, res) => {
       ) VALUES (
         :employeeId, :firstName, :middleName, :lastName, :email,
         :salary, SYSDATE, :username, :password,
-        101, :jobId, :depId, :supervisorId
+        :branchId, :jobId, :depId, :supervisorId
       )`,
       {
         employeeId: newEmployeeId,
@@ -1723,6 +1842,7 @@ app.post("/staff", async (req, res) => {
         salary,
         username,
         password: hashedPassword,
+        branchId: branchId,
         jobId: JOB_ID,
         depId: departmentId,
         supervisorId: supervisorId || null
@@ -1754,61 +1874,271 @@ app.post("/staff", async (req, res) => {
 });
 
 // ==========================================
-// UPDATE STAFF MEMBER (With Salary Check)
+// UPDATE STAFF MEMBER (With Salary Check & Permissions)
 // ==========================================
 app.put("/staff/:employeeId", async (req, res) => {
   const { employeeId } = req.params;
-  const { firstName, lastName, email, role, salary, password, phones, depId } = req.body;
+  const { firstName, middleName, lastName, email, role, salary, password, phones, depId, branchId, requesterId, username, supervisorId } = req.body;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    // 1. Fetch salary constraints for the (possibly new) role
-    const jobResult = await connection.execute(
-      `SELECT job_id, min_salary, max_salary FROM jobs WHERE job_title = :role`,
-      { role },
+    // 0. Get requester info for permission checks
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    if (requesterId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+      }
+    }
+
+    // Get target employee info for permission validation
+    const targetResult = await connection.execute(
+      `SELECT job_id, branch_id, supervisor_id FROM employees WHERE employee_id = :empId`,
+      { empId: employeeId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    if (jobResult.rows.length === 0) {
-      return res.status(400).json({ message: `Role "${role}" not found in Jobs table.` });
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ message: "Employee not found." });
     }
 
-    const { JOB_ID, MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+    const targetJobId = targetResult.rows[0].JOB_ID;
+    const targetBranchId = targetResult.rows[0].BRANCH_ID;
+    const targetSupervisorId = targetResult.rows[0].SUPERVISOR_ID;
+    const isSelfEdit = String(employeeId) === String(requesterId);
 
-    // 2. Validate salary against range
-    if (salary < MIN_SALARY || salary > MAX_SALARY) {
-      return res.status(400).json({ 
-        message: `Salary violation: For a ${role}, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
-      });
-    }
-
-    // 3. Build update SQL dynamically to include dep_id if provided
-    let updateSql;
-    let params;
-
-    if (depId !== undefined && depId !== null && depId !== '') {
-      // Include dep_id in the update
-            const hashedPassword = await bcrypt.hash(password, 10);
-      if (password && String(password).trim() !== '') {
-        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.dep_id = :depId, e.password = :password WHERE e.employee_id = :employeeId`;
-        params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), password: hashedPassword , employeeId };
-      } else {
-        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.dep_id = :depId WHERE e.employee_id = :employeeId`;
-        params = { firstName, lastName, email, jobId: JOB_ID, salary, depId: Number(depId), employeeId };
+    // Duplicate email check
+    if (email) {
+      const emailCheck = await connection.execute(
+        `SELECT employee_id FROM employees WHERE LOWER(email) = LOWER(:email) AND employee_id != :empId`,
+        { email, empId: employeeId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (emailCheck.rows.length > 0) {
+        return res.status(400).json({ message: "Email is already in use by another employee." });
       }
-    } else {
-      // No department change
+    }
+
+    // Duplicate username check
+    if (username && requesterJobId === 3) {
+      const userCheck = await connection.execute(
+        `SELECT employee_id FROM employees WHERE LOWER(username) = LOWER(:username) AND employee_id != :empId`,
+        { username, empId: employeeId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (userCheck.rows.length > 0) {
+        return res.status(400).json({ message: "Username is already taken." });
+      }
+    }
+
+    // PERMISSION CHECK: Who can edit what
+    // Hierarchical: Admin (3) → Branch Manager (4) → Dept Manager (1) → Teller (2)
+    // Teller (JOB_ID=2) cannot edit anyone
+    if (requesterJobId === 2) {
+      return res.status(403).json({ message: "Tellers cannot edit staff." });
+    }
+
+    // SELF-EDIT: Anyone can edit their own profile, but only phone and password
+    // Cannot change role, salary, department, branch
+    if (isSelfEdit) {
+      if (role !== undefined && role !== null && role !== '') {
+        return res.status(403).json({ message: "You cannot change your own role." });
+      }
+      if (salary !== undefined && salary !== null && salary !== '') {
+        return res.status(403).json({ message: "You cannot change your own salary." });
+      }
+      if (depId !== undefined && depId !== null && depId !== '') {
+        return res.status(403).json({ message: "You cannot change your own department." });
+      }
+      if (branchId !== undefined && branchId !== null && branchId !== '') {
+        return res.status(403).json({ message: "You cannot change your own branch." });
+      }
+    }
+    // ADMIN (JOB_ID=3): can edit everyone with all fields
+    else if (requesterJobId === 3) {
+      if (role) {
+        const jobResult = await connection.execute(
+          `SELECT job_id, min_salary, max_salary FROM jobs WHERE job_title = :role`,
+          { role },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (jobResult.rows.length === 0) {
+          return res.status(400).json({ message: `Role "${role}" not found in Jobs table.` });
+        }
+        const { JOB_ID, MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+        if (salary && (salary < MIN_SALARY || salary > MAX_SALARY)) {
+          return res.status(400).json({
+            message: `Salary violation: For a ${role}, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.`
+          });
+        }
+      }
+    }
+    // BRANCH MANAGER (JOB_ID=4): Can edit dept managers (1) and tellers (2) in their branch
+    // CAN change roles (but not to admin/3 or branch manager/4) and salary
+    else if (requesterJobId === 4) {
+      if (targetBranchId !== requesterBranchId) {
+        return res.status(403).json({ message: "You can only edit staff in your branch." });
+      }
+      // Cannot edit admins or other branch managers
+      if (targetJobId !== 1 && targetJobId !== 2) {
+        return res.status(403).json({ message: "You can only edit Department Managers and Tellers." });
+      }
+      // Cannot change department or branch
+      if (depId !== undefined && depId !== null && depId !== '') {
+        return res.status(403).json({ message: "You cannot change staff department." });
+      }
+      if (branchId !== undefined && branchId !== null && branchId !== '') {
+        return res.status(403).json({ message: "You cannot change staff branch." });
+      }
+      // Role IS allowed but validate target is not admin (3) or branch manager (4)
+      if (role !== undefined && role !== null && role !== '') {
+        const newRoleResult = await connection.execute(
+          `SELECT job_id FROM jobs WHERE job_title = :role`,
+          { role },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (newRoleResult.rows.length > 0) {
+          const newJobId = newRoleResult.rows[0].JOB_ID;
+          if (newJobId === 3 || newJobId === 4) {
+            return res.status(403).json({ message: "You cannot promote staff to Administrator or Branch Manager." });
+          }
+        }
+      }
+      // Salary IS allowed - validate if provided
+      if (salary !== undefined && salary !== null && salary !== '') {
+        const jobResult = await connection.execute(
+          `SELECT min_salary, max_salary FROM jobs WHERE job_id = :jobId`,
+          { jobId: targetJobId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (jobResult.rows.length > 0) {
+          const { MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+          if (salary < MIN_SALARY || salary > MAX_SALARY) {
+            return res.status(400).json({ 
+              message: `Salary violation: For this role, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
+            });
+          }
+        }
+      }
+    }
+    // DEPARTMENT MANAGER (JOB_ID=1): Can only edit tellers (2) in their department & branch
+    // CAN change salary but NOT roles
+    else if (requesterJobId === 1) {
+      const requesterDepResult = await connection.execute(
+        `SELECT dep_id, branch_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const requesterDepId = requesterDepResult.rows.length > 0 ? requesterDepResult.rows[0].DEP_ID : null;
+      
+      // Target must be in same department AND same branch
+      if (requesterDepId && (targetResult.rows[0].DEP_ID !== requesterDepId || targetResult.rows[0].BRANCH_ID !== requesterBranchId)) {
+        return res.status(403).json({ message: "You can only edit staff in your department and branch." });
+      }
+      // Can only edit tellers
+      if (targetJobId !== 2) {
+        return res.status(403).json({ message: "You can only edit Tellers." });
+      }
+      // Cannot change role
+      if (role !== undefined && role !== null && role !== '') {
+        return res.status(403).json({ message: "You cannot change staff roles." });
+      }
+      // Cannot change department or branch
+      if (depId !== undefined && depId !== null && depId !== '') {
+        return res.status(403).json({ message: "You cannot change staff department." });
+      }
+      if (branchId !== undefined && branchId !== null && branchId !== '') {
+        return res.status(403).json({ message: "You cannot change staff branch." });
+      }
+      // Salary IS allowed - validate if provided
+      if (salary !== undefined && salary !== null && salary !== '') {
+        const jobResult = await connection.execute(
+          `SELECT min_salary, max_salary FROM jobs WHERE job_id = :jobId`,
+          { jobId: targetJobId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (jobResult.rows.length > 0) {
+          const { MIN_SALARY, MAX_SALARY } = jobResult.rows[0];
+          if (salary < MIN_SALARY || salary > MAX_SALARY) {
+            return res.status(400).json({ 
+              message: `Salary violation: For this role, salary must be between $${MIN_SALARY.toLocaleString()} and $${MAX_SALARY.toLocaleString()}.` 
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Build update SQL dynamically based on permissions
+    const updateFields = [];
+    const params = { employeeId, firstName, lastName, email };
+
+    // Basic fields - allowed for everyone
+    updateFields.push('first_name = :firstName', 'last_name = :lastName', 'email = :email');
+
+    // Middle name update
+    if (middleName !== undefined) {
+      params.middleName = middleName || null;
+      updateFields.push('middle_name = :middleName');
+    }
+
+    // Username - only Admin can change
+    if (requesterJobId === 3 && username && !isSelfEdit) {
+      params.username = username;
+      updateFields.push('username = :username');
+    }
+
+    // Admin and Branch Manager can change role
+    if ((requesterJobId === 3 || requesterJobId === 4) && role && !isSelfEdit) {
+      const jobResult = await connection.execute(
+        `SELECT job_id FROM jobs WHERE job_title = :role`,
+        { role },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (jobResult.rows.length > 0) {
+        params.jobId = jobResult.rows[0].JOB_ID;
+        updateFields.push('job_id = :jobId');
+      }
+    }
+
+    // Admin, Branch Manager, and Department Manager can change salary
+    if ((requesterJobId === 3 || requesterJobId === 4 || requesterJobId === 1) && salary && !isSelfEdit) {
+      params.salary = salary;
+      updateFields.push('salary = :salary');
+    }
+
+    // Password update
+    // Only Admin can change department and branch
+    if (requesterJobId === 3 && depId !== undefined && depId !== null && depId !== '' && !isSelfEdit) {
+      params.depId = Number(depId);
+      updateFields.push('dep_id = :depId');
+    }
+
+    if (requesterJobId === 3 && branchId !== undefined && branchId !== null && branchId !== '' && !isSelfEdit) {
+      params.branchId = Number(branchId);
+      updateFields.push('branch_id = :branchId');
+    }
+
+    // Only Admin can change supervisor (branch managers have no supervisor — allow null)
+    if (requesterJobId === 3 && supervisorId !== undefined) {
+      params.supervisorId = supervisorId || null;
+      updateFields.push('supervisor_id = :supervisorId');
+    }
+
+    if (password && String(password).trim() !== '') {
       const hashedPassword = await bcrypt.hash(password, 10);
-      if (password && String(password).trim() !== '') {
-        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary, e.password = :password WHERE e.employee_id = :employeeId`;
-        params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId, password: hashedPassword };
-      } else {
-        updateSql = `UPDATE employees e SET e.first_name = :firstName, e.last_name = :lastName, e.email = :email, e.job_id = :jobId, e.salary = :salary WHERE e.employee_id = :employeeId`;
-        params = { firstName, lastName, email, jobId: JOB_ID, salary, employeeId };
-      }
+      updateFields.push('password = :password');
+      params.password = hashedPassword;
     }
+
+    const updateSql = `UPDATE employees e SET ${updateFields.join(', ')} WHERE e.employee_id = :employeeId`;
 
     await connection.execute(updateSql, params, { autoCommit: false });
 
@@ -1840,11 +2170,42 @@ app.put("/staff/:employeeId", async (req, res) => {
 // DELETE STAFF MEMBER
 app.delete("/staff/:employeeId", async (req, res) => {
   const { employeeId } = req.params;
+  const { requesterId } = req.query;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
 
+    // Get requester info for permission checks
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    if (requesterId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+      }
+    }
+
+    // PERMISSION CHECK: Only IT Admin (JOB_ID=3) can delete staff
+    if (requesterJobId !== 3) {
+      return res.status(403).json({ success: false, message: "Only System Administrators can delete staff members." });
+    }
+
+    // Prevent self-deletion
+    if (String(employeeId) === String(requesterId)) {
+      return res.status(403).json({ success: false, message: "You cannot delete yourself." });
+    }
+
+    // Cascade delete dependants first, then employee
+    await connection.execute(
+      `DELETE FROM dependants WHERE employee_id = :employeeId`,
+      { employeeId }
+    );
     await connection.execute(
       `DELETE FROM employees WHERE employee_id = :employeeId`,
       { employeeId },
@@ -1967,14 +2328,107 @@ app.get("/staff/:employeeId/dependants", async (req, res) => {
   }
 });
 
+// CHECK USERNAME AVAILABILITY
+app.get("/staff/check-username", async (req, res) => {
+  const { username, excludeId } = req.query;
+  let connection;
+
+  try {
+    if (!username) {
+      return res.json({ available: false });
+    }
+    connection = await oracledb.getConnection(dbConfig);
+    let query = `SELECT employee_id FROM employees WHERE LOWER(username) = LOWER(:username)`;
+    const params = { username };
+    if (excludeId) {
+      query += ` AND employee_id != :excludeId`;
+      params.excludeId = excludeId;
+    }
+    const result = await connection.execute(query, params, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    res.json({ available: result.rows.length === 0 });
+  } catch (err) {
+    console.error(err);
+    res.json({ available: false });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 // ADD STAFF DEPENDANT
 app.post("/staff/:employeeId/dependants", async (req, res) => {
   const { employeeId } = req.params;
-  const { nationalId, firstName, middleName, lastName, relationship } = req.body;
+  const { nationalId, firstName, middleName, lastName, relationship, requesterId } = req.body;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
+
+    // Get requester info for permission checks
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    let requesterDepId = null;
+    if (requesterId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id, dep_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+        requesterDepId = requesterResult.rows[0].DEP_ID;
+      }
+    }
+
+    // Get target employee info
+    const targetResult = await connection.execute(
+      `SELECT job_id, branch_id, dep_id FROM employees WHERE employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Employee not found." });
+    }
+
+    const targetJobId = targetResult.rows[0].JOB_ID;
+    const targetBranchId = targetResult.rows[0].BRANCH_ID;
+    const targetDepId = targetResult.rows[0].DEP_ID;
+
+    // PERMISSION CHECK for adding dependants:
+    // ADMIN (3): can add dependants to anyone
+    // BRANCH MANAGER (4): can add dependants to department managers (1) and tellers (2) in their branch
+    // DEPT MANAGER (1): can add dependants ONLY to tellers (JOB_ID=2)
+    // TELLER (2): cannot add dependants
+
+    if (requesterJobId === 2) {
+      return res.status(403).json({ success: false, message: "Tellers cannot add dependants." });
+    }
+
+    if (requesterJobId === 4) {
+      // Branch Manager can add dependants for dept managers and tellers in their branch
+      if (targetJobId !== 1 && targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "You can only add dependants for Department Managers and Tellers." });
+      }
+      if (targetBranchId !== requesterBranchId) {
+        return res.status(403).json({ success: false, message: "You can only add dependants to staff in your branch." });
+      }
+    }
+
+    if (requesterJobId === 1) {
+      // Dept managers can only add dependants to tellers in their department AND branch
+      if (targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "Department Managers can only add dependants to Tellers." });
+      }
+      // Target must be in same department AND same branch
+      if (requesterDepId && (targetDepId !== requesterDepId || targetBranchId !== requesterBranchId)) {
+        return res.status(403).json({ success: false, message: "You can only add dependants to staff in your department and branch." });
+      }
+    }
+
+    if (!nationalId || String(nationalId).trim().length !== 14 || !/^\d{14}$/.test(String(nationalId))) {
+      return res.status(400).json({ success: false, message: "National ID must be exactly 14 digits." });
+    }
 
     // Check if dependant count is already 4
     const countResult = await connection.execute(
@@ -2013,10 +2467,66 @@ app.post("/staff/:employeeId/dependants", async (req, res) => {
 // DELETE STAFF DEPENDANT
 app.delete("/staff/:employeeId/dependants/:nationalId", async (req, res) => {
   const { employeeId, nationalId } = req.params;
+  const { requesterId } = req.body;
   let connection;
 
   try {
     connection = await oracledb.getConnection(dbConfig);
+
+    // Get requester info for permission checks
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    let requesterDepId = null;
+    if (requesterId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id, dep_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+        requesterDepId = requesterResult.rows[0].DEP_ID;
+      }
+    }
+
+    // Get target employee info
+    const targetResult = await connection.execute(
+      `SELECT job_id, branch_id, dep_id FROM employees WHERE employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Employee not found." });
+    }
+
+    const targetJobId = targetResult.rows[0].JOB_ID;
+    const targetBranchId = targetResult.rows[0].BRANCH_ID;
+    const targetDepId = targetResult.rows[0].DEP_ID;
+
+    // PERMISSION CHECK for deleting dependants (same hierarchy as adding):
+    if (requesterJobId === 2) {
+      return res.status(403).json({ success: false, message: "Tellers cannot delete dependants." });
+    }
+
+    if (requesterJobId === 4) {
+      if (targetJobId !== 1 && targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "You can only delete dependants for Department Managers and Tellers." });
+      }
+      if (targetBranchId !== requesterBranchId) {
+        return res.status(403).json({ success: false, message: "You can only delete dependants of staff in your branch." });
+      }
+    }
+
+    if (requesterJobId === 1) {
+      if (targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "Department Managers can only delete dependants of Tellers." });
+      }
+      if (requesterDepId && (targetDepId !== requesterDepId || targetBranchId !== requesterBranchId)) {
+        return res.status(403).json({ success: false, message: "You can only delete dependants of staff in your department and branch." });
+      }
+    }
 
     await connection.execute(
       `DELETE FROM dependants WHERE employee_id = :empId AND national_id = :nationalId`,
@@ -2025,6 +2535,93 @@ app.delete("/staff/:employeeId/dependants/:nationalId", async (req, res) => {
     );
 
     res.json({ success: true, message: "Dependant removed successfully." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// EDIT STAFF DEPENDANT
+app.put("/staff/:employeeId/dependants/:nationalId", async (req, res) => {
+  const { employeeId, nationalId: oldNationalId } = req.params;
+  const { firstName, middleName, lastName, relationship, nationalId: newNationalId, requesterId } = req.body;
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // Same permission check as DELETE
+    let requesterJobId = null;
+    let requesterBranchId = null;
+    let requesterDepId = null;
+    if (requesterId) {
+      const requesterResult = await connection.execute(
+        `SELECT job_id, branch_id, dep_id FROM employees WHERE employee_id = :empId`,
+        { empId: requesterId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (requesterResult.rows.length > 0) {
+        requesterJobId = requesterResult.rows[0].JOB_ID;
+        requesterBranchId = requesterResult.rows[0].BRANCH_ID;
+        requesterDepId = requesterResult.rows[0].DEP_ID;
+      }
+    }
+
+    const targetResult = await connection.execute(
+      `SELECT job_id, branch_id, dep_id FROM employees WHERE employee_id = :empId`,
+      { empId: employeeId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Employee not found." });
+    }
+
+    const targetJobId = targetResult.rows[0].JOB_ID;
+    const targetBranchId = targetResult.rows[0].BRANCH_ID;
+    const targetDepId = targetResult.rows[0].DEP_ID;
+
+    if (requesterJobId === 2) {
+      return res.status(403).json({ success: false, message: "Tellers cannot edit dependants." });
+    }
+
+    if (requesterJobId === 4) {
+      if (targetJobId !== 1 && targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "You can only edit dependants for Department Managers and Tellers." });
+      }
+      if (targetBranchId !== requesterBranchId) {
+        return res.status(403).json({ success: false, message: "You can only edit dependants of staff in your branch." });
+      }
+    }
+
+    if (requesterJobId === 1) {
+      if (targetJobId !== 2) {
+        return res.status(403).json({ success: false, message: "Department Managers can only edit dependants of Tellers." });
+      }
+      if (requesterDepId && (targetDepId !== requesterDepId || targetBranchId !== requesterBranchId)) {
+        return res.status(403).json({ success: false, message: "You can only edit dependants of staff in your department and branch." });
+      }
+    }
+
+    const finalNationalId = (newNationalId || oldNationalId).trim();
+    if (!finalNationalId || finalNationalId.length !== 14 || !/^\d{14}$/.test(finalNationalId)) {
+      return res.status(400).json({ success: false, message: "National ID must be exactly 14 digits." });
+    }
+
+    await connection.execute(
+      `UPDATE dependants SET national_id = :finalNationalId, first_name = :firstName, middle_name = :middleName, last_name = :lastName, relationship = :relationship
+       WHERE employee_id = :empId AND national_id = :oldNationalId`,
+      {
+        finalNationalId, firstName,
+        middleName: middleName || null, lastName, relationship,
+        empId: employeeId, oldNationalId
+      },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true, message: "Dependant updated successfully." });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: err.message });
